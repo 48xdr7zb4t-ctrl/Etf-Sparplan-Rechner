@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>ETF-Sparplan Rechner mit ETF-Kosten & Steuern</title>
+
+<style>
+body {
+    font-family: Arial;
+    background:#f4f4f4;
+    margin:0;
+    padding:0;
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+/* Hauptcontainer */
+.container {
+    max-width:1100px;
+    width:100%;
+    padding:40px;
+}
+
+/* Standard Box (groß – Seite 3 & 4) */
+.box {
+    background:white;
+    padding:25px;
+    border-radius:12px;
+    margin-bottom:20px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+}
+
+/* 🔹 KLEINE BOX (nur Seite 1 & 2) */
+.box-small {
+    max-width:420px;
+    width:100%;
+    margin:0 auto;
+}
+
+/* Inputs & Buttons */
+input, button {
+    width:100%;
+    padding:10px;
+    margin-top:10px;
+}
+
+button {
+    background:#4CAF50;
+    color:white;
+    border:none;
+    cursor:pointer;
+}
+
+/* Strategie Auswahl */
+.strategy-grid {
+    display:flex;
+    justify-content:center;
+    gap:15px;
+    margin-top:20px;
+    flex-wrap:wrap;
+}
+
+.strategy-card {
+    border:2px solid #ddd;
+    border-radius:12px;
+    padding:20px;
+    cursor:pointer;
+    text-align:center;
+    min-width:120px;
+}
+
+.strategy-card.active {
+    border-color:#4CAF50;
+    background:#f1fbf3;
+}
+
+/* Tabellen */
+table {
+    width:100%;
+    border-collapse:collapse;
+    margin-top:20px;
+}
+
+th, td {
+    padding:10px;
+    border-bottom:1px solid #ddd;
+    text-align:center;
+}
+
+/* Ergebnis Layout */
+.result-container {
+    display:flex;
+    gap:30px;
+    flex-wrap:wrap;
+}
+
+.result-box { flex:2; }
+
+.info-box {
+    flex:1;
+    background:#fafafa;
+    padding:20px;
+    border-radius:10px;
+}
+
+/* ETF Auswahl Layout */
+#etf-box {
+    align-items:flex-start;
+}
+
+#etf-box h2 {
+    align-self:center;
+    margin-bottom:20px;
+}
+
+#etf-tables {
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<!-- SEITE 1: INPUT (klein & mittig) -->
+<div class="box box-small" id="input-box">
+    <h2>ETF-Sparplan Rechner</h2>
+    <input id="pv" type="number" placeholder="Startkapital (€)">
+    <input id="pmt" type="number" placeholder="Monatliche Sparrate (€)">
+    <input id="jahre" type="number" placeholder="Anlagedauer (max. 100)">
+    <button onclick="goToStrategy()">Weiter</button>
+</div>
+
+<!-- SEITE 2: STRATEGIE (klein & mittig) -->
+<div class="box box-small" id="strategy-box" style="display:none;">
+    <h2>ETF-Strategie auswählen</h2>
+
+    <div class="strategy-grid">
+        <div class="strategy-card" onclick="selectStrategy(1)">1 ETF<br><strong>100%</strong></div>
+        <div class="strategy-card" onclick="selectStrategy(2)">2 ETFs<br><strong>70 / 30</strong></div>
+        <div class="strategy-card" onclick="selectStrategy(3)">3 ETFs<br><strong>50 / 30 / 20</strong></div>
+    </div>
+
+    <button onclick="goToEtfs()">Weiter</button>
+</div>
+
+<!-- SEITE 3: ETF AUSWAHL (groß) -->
+<div class="box" id="etf-box" style="display:none;">
+    <h2>ETF-Auswahl</h2>
+    <div id="etf-tables"></div>
+    <button onclick="berechnen()">Berechnen</button>
+</div>
+
+<!-- SEITE 4: ERGEBNIS (groß) -->
+<div class="box" id="ergebnis-box" style="display:none;">
+    <h2>Ergebnis – Szenariovergleich</h2>
+
+    <div class="result-container">
+        <div class="result-box">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Schlechtester Fall</th>
+                        <th>Durchschnitt</th>
+                        <th>Bester Fall</th>
+                    </tr>
+                </thead>
+                <tbody id="vergleich"></tbody>
+            </table>
+        </div>
+
+        <div class="info-box">
+            <h3>Deine Eingaben</h3>
+            <p><strong>Startkapital:</strong><br><span id="info-pv"></span></p>
+            <p><strong>Monatliche Sparrate:</strong><br><span id="info-pmt"></span></p>
+            <p><strong>Anlagedauer:</strong><br><span id="info-jahre"></span> Jahre</p>
+            <p><strong>Investiert gesamt:</strong><br><span id="info-invest"></span></p>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<!-- 🔽 Dein kompletter JavaScript-Code bleibt UNVERÄNDERT 🔽 -->
+<script>
+/* JS exakt wie bei dir – nichts geändert */
+</script>
+
+</body>
+</html>
+
+<script>
+let strategy = null;
+
+// ETF Daten
+const etfData = {
+    world5:[
+        {wkn:"A2PKXG",name:"Vanguard FTSE All-World ",ter:0.0019,pos:"3.622"},
+        {wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225"},
+        {wkn:"A0RPWH",name:"iShares Core MSCI World",ter:0.0020,pos:"1.322"},
+        {wkn:"A1XB5U",name:"Xtrackers MSCI World",ter:0.0012,pos:"1.454"},
+        {wkn:"A2N6CW",name:"SPDR MSCI World ",ter:0.0012,pos:"1.313"}
+    ],
+       world3:[
+        {wkn:"A2PKXG",name:"Vanguard FTSE All-World ",ter:0.0019,pos:"3.622"},
+        {wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225"},
+        {wkn:"WELT0A",name:"L&G Gerd Kommer Multifactor Equity",ter:0.0045,pos:"4.105"},
+        
+    ],
+    em3:[
+        {wkn:"A0RPWJ",name:"iShares MSCI EM ",ter:0.0018,pos:"1.193"},
+        {wkn:"A1JCMZ",name:"HSBC MSCI Emerging Markets ",ter:0.0015,pos:"1.196"},
+        {wkn:"A1JJTE",name:"SPDR MSCI Emerging Markets",ter:0.0018,pos:"1.167"},
+        {wkn:"A2QAFK",name:"iShares MSCI EM ex-China ",ter:0.0018,pos:"637"}
+    ],
+    variable4:[
+        {wkn:"A0RPWG",name:"iShares Core MSCI Europe ",ter:0.0012,pos:"403"},
+        {wkn:"A0YEDG",name:"iShares Core S&P 500 UCITS ETF",ter:0.0007,pos:"503"},
+        {wkn:"A2DWBY",name:"iShares MSCI World Small Cap",ter:0.0035,pos:"3.400"}
+    ]
+};
+
+const weights = {1:[1],2:[0.7,0.3],3:[0.5,0.3,0.2]};
+
+function getZinsen(t){
+    if(t<=5)return[-0.42,0.07,0.39];
+    if(t<=10)return[-0.05,0.067,0.25];
+    if(t<=15)return[-0.02,0.07,0.16];
+    if(t<=20)return[0.01,0.074,0.15];
+    if(t<=25)return[0.02,0.075,0.13];
+    if(t<=30)return[0.05,0.076,0.12];
+    if(t<=35)return[0.05,0.075,0.09];
+    if(t<=40)return[0.06,0.074,0.08];
+    return[0.06,0.069,0.08];
+}
+
+function berechneFV(PV,PMT,r,t){
+    return PMT*((Math.pow(1+r/12,12*t)-1)/(r/12))+PV*Math.pow(1+r/12,12*t);
+}
+
+function goToStrategy(){
+    const PV = +document.getElementById("pv").value;
+    const PMT = +document.getElementById("pmt").value;
+    const t = +document.getElementById("jahre").value;
+    if(isNaN(PV)||isNaN(PMT)||isNaN(t)||t<=0||t>100){
+        alert("Bitte alle Felder korrekt ausfüllen.");
+        return;
+    }
+    document.getElementById("input-box").style.display="none";
+    document.getElementById("strategy-box").style.display="block";
+}
+
+function selectStrategy(n){
+    strategy = n;
+    document.querySelectorAll(".strategy-card").forEach(c=>c.classList.remove("active"));
+    document.querySelectorAll(".strategy-card")[n-1].classList.add("active");
+}
+
+function goToEtfs(){
+    if(!strategy){ alert("Bitte eine Strategie auswählen."); return;}
+    document.getElementById("strategy-box").style.display="none";
+
+    const container = document.getElementById("etf-tables");
+    container.innerHTML = "";
+
+    if(strategy==1){
+        container.innerHTML += createTable("World ETF 100%",etfData.world3,"etf1");
+    }else if(strategy==2){
+        container.innerHTML += createTable("World ETF 70%",etfData.world5,"etf2w");
+        container.innerHTML += createTable("EM ETF 30%",etfData.em3,"etf2em");
+    }else if(strategy==3){
+        container.innerHTML += createTable("World ETF 50%",etfData.world5,"etf3w");
+        container.innerHTML += createTable("EM ETF 30%",etfData.em3,"etf3em");
+        container.innerHTML += createTable("beliebiger ETF 20%",etfData.variable4,"etf3s");
+           container.innerHTML += `<p style="margin-top:10px; font-style:italic; color:#555;">
+            Hinweis: Es gibt viele weitere ETFs – diese Auswahl ist nur ein Beispiel..
+        </p>`;
+    }
+
+    document.getElementById("etf-box").style.display="block";
+}
+
+function createTable(title,etfs,name){
+    let html = `<h3>${title}</h3><table><thead><tr><th></th><th>WKN</th><th>Name</th><th>TER</th><th>Position</th></tr></thead><tbody>`;
+    etfs.forEach((e,i)=>{
+        html += `<tr>
+            <td><input type="radio" name="${name}" value="${i}" required></td>
+            <td>${e.wkn}</td>
+            <td>${e.name}</td>
+            <td>${(e.ter*100).toFixed(2)}%</td>
+            <td>${e.pos}</td>
+        </tr>`;
+    });
+    html += "</tbody></table>";
+    return html;
+}
+
+function berechnen(){
+    const PV = +document.getElementById("pv").value;
+    const PMT = +document.getElementById("pmt").value;
+    const t = +document.getElementById("jahre").value;
+    const invest = PV + PMT*12*t;
+    const [rw,ra,rb] = getZinsen(t);
+
+    let selectedETFs = [];
+    if(strategy==1){
+        const idx = document.querySelector('input[name="etf1"]:checked')?.value;
+        if(idx===undefined){alert("Bitte ETF auswählen."); return;}
+        selectedETFs.push({ter: etfData.world3[idx].ter, weight:1});
+    } else if(strategy==2){
+        const idxw = document.querySelector('input[name="etf2w"]:checked')?.value;
+        const idxem = document.querySelector('input[name="etf2em"]:checked')?.value;
+        if(idxw===undefined || idxem===undefined){alert("Bitte beide ETFs auswählen."); return;}
+        selectedETFs.push({ter: etfData.world5[idxw].ter, weight:0.7});
+        selectedETFs.push({ter: etfData.em3[idxem].ter, weight:0.3});
+    } else if(strategy==3){
+        const idxw = document.querySelector('input[name="etf3w"]:checked')?.value;
+        const idxem = document.querySelector('input[name="etf3em"]:checked')?.value;
+        const idxs = document.querySelector('input[name="etf3s"]:checked')?.value;
+        if(idxw===undefined || idxem===undefined || idxs===undefined){alert("Bitte alle ETFs auswählen."); return;}
+        selectedETFs.push({ter: etfData.world5[idxw].ter, weight:0.5});
+        selectedETFs.push({ter: etfData.em3[idxem].ter, weight:0.3});
+        selectedETFs.push({ter: etfData.variable4[idxs].ter, weight:0.2});
+    }
+
+    const gesamtTER = selectedETFs.reduce((sum,e)=>sum+e.ter*e.weight,0);
+
+    function calc(r){const end=berechneFV(PV,PMT,r,t); const kosten=end*gesamtTER*t; const steuer=Math.max(0,(end-invest)*0.25); return {end,kosten,steuer,net:end-kosten-steuer};}
+    const w = calc(rw), a = calc(ra), b = calc(rb);
+
+    document.getElementById("etf-box").style.display="none";
+    document.getElementById("ergebnis-box").style.display="block";
+
+    document.getElementById("vergleich").innerHTML = `
+        <tr><td>Endkapital</td><td>${w.end.toLocaleString("de-DE")} €</td><td>${a.end.toLocaleString("de-DE")} €</td><td>${b.end.toLocaleString("de-DE")} €</td></tr>
+        <tr><td>TER-Kosten</td><td>${w.kosten.toLocaleString("de-DE")} €</td><td>${a.kosten.toLocaleString("de-DE")} €</td><td>${b.kosten.toLocaleString("de-DE")} €</td></tr>
+        <tr><td>Steuern</td><td>${w.steuer.toLocaleString("de-DE")} €</td><td>${a.steuer.toLocaleString("de-DE")} €</td><td>${b.steuer.toLocaleString("de-DE")} €</td></tr>
+        <tr><th>Netto-Endkapital</th><th>${w.net.toLocaleString("de-DE")} €</th><th>${a.net.toLocaleString("de-DE")} €</th><th>${b.net.toLocaleString("de-DE")} €</th></tr>
+    `;
+
+    document.getElementById("info-pv").innerText = PV.toLocaleString("de-DE")+" €";
+    document.getElementById("info-pmt").innerText = PMT.toLocaleString("de-DE")+" €";
+    document.getElementById("info-jahre").innerText = t;
+    document.getElementById("info-invest").innerText = invest.toLocaleString("de-DE")+" €";
+}
+</script>
+
+</body>
+</html>
