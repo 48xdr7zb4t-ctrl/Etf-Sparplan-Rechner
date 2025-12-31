@@ -289,7 +289,7 @@ function goToEtfs(){
 }
 
 function createTable(title,etfs,name){
-    let html = `<h3>${title}</h3><table><thead><tr><th></th><th>WKN</th><th>Name</th><th>TER</th><th>Position</th></tr></thead><tbody>`;
+    let html = `<h3>${title}</h3><table><thead><tr><th></th><th>WKN</th><th>Name</th><th>TER</th><th>Aktien</th></tr></thead><tbody>`;
     etfs.forEach((e,i)=>{
         html += `<tr>
             <td><input type="radio" name="${name}" value="${i}" required></td>
