@@ -312,7 +312,21 @@ if(mode=="ansparzeit") {
     </tr>`;
 }
     document.getElementById("vergleich").innerHTML=vergleichHTML;
-
+// Zusätzlicher Text nur beim Endkapital-Modus
+const extraTextContainer = document.getElementById("ergebnis-box");
+if(mode === "endkapital") {
+    let text = `<p style="margin-top:20px; font-style:italic;">
+   Jährliche Vorabpauschale ca. 20 € pro 10.000€; jährlicher Freibetrag von 1000€ 
+    </p>`;
+    // Prüfen, ob schon ein Text vorhanden ist, ggf. alten Text entfernen
+    const existingText = document.getElementById("endkapital-text");
+    if(existingText) existingText.remove();
+    // Text erstellen
+    const p = document.createElement("div");    
+    p.id = "endkapital-text";
+    p.innerHTML = text;
+    extraTextContainer.appendChild(p);
+}
     // Eingaben anzeigen
 let infoHTML=`<p><strong>Modus:</strong> ${mode}</p>`;
 if(mode=="endkapital"||mode=="sparrate") infoHTML+=`<p><strong>Startkapital:</strong> ${PV.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p>`;
