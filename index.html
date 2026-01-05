@@ -175,10 +175,19 @@ function selectMode(m, el){
 // --- Strategie Auswahl ---
 function selectStrategy(n){
     strategy = n;
-    document.querySelectorAll("#strategy-box .strategy-card").forEach(c=>c.classList.remove("active"));
-    document.querySelectorAll("#strategy-box .strategy-card")[n-1].classList.add("active");
+    document.querySelectorAll("#strategy-box .strategy-card")
+        .forEach(c => c.classList.remove("active"));
+    document.querySelectorAll("#strategy-box .strategy-card")[n-1]
+        .classList.add("active");
 }
-function goToStrategy(){ document.getElementById("input-box").style.display="none"; document.getElementById("strategy-box").style.display="block"; }
+function goToStrategy(){
+    if(!mode){
+        alert("Bitte zuerst einen Modus auswählen");
+        return;
+    }
+    document.getElementById("input-box").style.display="none";
+    document.getElementById("strategy-box").style.display="block";
+}
 
 // --- ETF Auswahl ---
 function goToEtfs(){
@@ -210,138 +219,220 @@ document.addEventListener("click", e=>{
 
 // --- Berechnen ---
 function berechnen(){
-    const PV=parseFloat(document.getElementById("pv")?.value)||0;
-    const PMT=parseFloat(document.getElementById("pmt")?.value)||0;
-    const ziel=parseFloat(document.getElementById("ziel")?.value)||0;
-    const jahre=parseFloat(document.getElementById("jahre")?.value)||0;
-    const zins=parseFloat(document.getElementById("zins")?.value)/100||0;
+    const PV = parseFloat(document.getElementById("pv")?.value) || 0;
+    const PMT_INPUT = parseFloat(document.getElementById("pmt")?.value) || 0;
+    const ziel = parseFloat(document.getElementById("ziel")?.value) || 0;
+    const jahre = parseFloat(document.getElementById("jahre")?.value) || 0;
+    const zins = parseFloat(document.getElementById("zins")?.value) / 100 || 0;
 
-    // ETFs
-    let selectedETFs=[];
+    // ETFs & TER
+    let selectedETFs = [];
     if(strategy==1){
-        const idx=document.querySelector('input[name="etf1"]:checked')?.value; if(idx===undefined){ alert("ETF auswählen"); return;}
-        selectedETFs.push({...etfData.world3[idx],weight:1});
+        const i=document.querySelector('input[name="etf1"]:checked')?.value;
+        if(i===undefined){ alert("ETF auswählen"); return; }
+        selectedETFs.push({...etfData.world3[i],weight:1});
     }
     if(strategy==2){
-        const idxw=document.querySelector('input[name="etf2w"]:checked')?.value;
-        const idxem=document.querySelector('input[name="etf2em"]:checked')?.value;
-        if(idxw===undefined||idxem===undefined){ alert("Beide ETFs auswählen"); return;}
-        selectedETFs.push({...etfData.world5[idxw],weight:0.7});
-        selectedETFs.push({...etfData.em3[idxem],weight:0.3});
+        const w=document.querySelector('input[name="etf2w"]:checked')?.value;
+        const e=document.querySelector('input[name="etf2em"]:checked')?.value;
+        if(w===undefined||e===undefined){ alert("Beide ETFs auswählen"); return; }
+        selectedETFs.push({...etfData.world5[w],weight:0.7});
+        selectedETFs.push({...etfData.em3[e],weight:0.3});
     }
     if(strategy==3){
-        const idxw=document.querySelector('input[name="etf3w"]:checked')?.value;
-        const idxem=document.querySelector('input[name="etf3em"]:checked')?.value;
-        const idxs=document.querySelector('input[name="etf3s"]:checked')?.value;
-        if(idxw===undefined||idxem===undefined||idxs===undefined){ alert("Alle ETFs auswählen"); return;}
-        selectedETFs.push({...etfData.world5[idxw],weight:0.5});
-        selectedETFs.push({...etfData.em3[idxem],weight:0.3});
-        selectedETFs.push({...etfData.variable4[idxs],weight:0.2});
+        const w=document.querySelector('input[name="etf3w"]:checked')?.value;
+        const e=document.querySelector('input[name="etf3em"]:checked')?.value;
+        const s=document.querySelector('input[name="etf3s"]:checked')?.value;
+        if(w===undefined||e===undefined||s===undefined){ alert("Alle ETFs auswählen"); return; }
+        selectedETFs.push({...etfData.world5[w],weight:0.5});
+        selectedETFs.push({...etfData.em3[e],weight:0.3});
+        selectedETFs.push({...etfData.variable4[s],weight:0.2});
     }
 
-    const gesamtTER = selectedETFs.reduce((sum,e)=>sum+e.ter*e.weight,0);
-    const [rw, ra, rb] = zins>0 ? [zins,zins,zins] : getZinsen(jahre);
+    const gesamtTER = selectedETFs.reduce((sum,e)=>sum + e.ter * e.weight, 0);
+    const [rw,ra,rb] = zins>0 ? [zins,zins,zins] : getZinsen(jahre);
 
     function calc(r){
-        let tBerechnet = jahre, monatlicheSparrate = PMT;
-        let end=0, net=0, kosten=0, steuer=0;
+        let end = 0;
+        let dauer = jahre;
+        let PMT = PMT_INPUT;
+        let einzahlungen = 0;
 
-        if(mode=="endkapital") end = berechneFV(PV, PMT, r, jahre);
-        if(mode=="sparrate"){
+        // --- Endkapital ---
+        if(mode==="endkapital"){
+            end = berechneFV(PV, PMT, r, jahre);
+            einzahlungen = PV + PMT * 12 * jahre;
+        }
+
+        // --- Sparrate ---
+        if(mode==="sparrate"){
             let guess = 100;
             for(let i=0;i<50;i++){
                 let fv = berechneFV(PV, guess, r, jahre);
-                let kostenIter = fv*gesamtTER*jahre;
-                let steuerIter = Math.max(0,fv-PV-guess*12*jahre)*0.25*0.7;
-                let netIter = fv - kostenIter - steuerIter;
-                guess *= ziel/netIter;
+                let ein = PV + guess * 12 * jahre;
+                let kosten = fv * gesamtTER * jahre;
+                let gewinn = Math.max(0, fv - ein);
+                let steuer = gewinn * 0.25 * 0.7;
+                let net = fv - kosten - steuer;
+                guess *= ziel / net;
             }
-            monatlicheSparrate = guess;
-            end = berechneFV(PV, monatlicheSparrate, r, jahre);
+            PMT = guess;
+            end = berechneFV(PV, PMT, r, jahre);
+            einzahlungen = PV + PMT * 12 * jahre;
         }
-        if(mode=="ansparzeit"){
-            tBerechnet = berechneJahre(PV, PMT, ziel, r);
+
+        // --- Ansparzeit ---
+        if(mode==="ansparzeit"){
+            dauer = berechneJahre(PV, PMT, ziel, r);
             end = ziel;
+            einzahlungen = PV + PMT * 12 * dauer;
         }
 
-        kosten = end*gesamtTER*tBerechnet;
-        steuer = Math.max(0,end-PV-(mode=="sparrate"? monatlicheSparrate*12*tBerechnet : PMT*12*tBerechnet))*0.25*0.7;
-        net = end - kosten - steuer;
+        // --- Kosten & Steuern (NUR auf Gewinn) ---
+        const kosten = end * gesamtTER * dauer;
+        const gewinn = Math.max(0, end - einzahlungen);
+        const steuer = gewinn * 0.25 * 0.7;
+        const net = end - kosten - steuer;
 
-        return {end,kosten,steuer,net,dauer:tBerechnet,PMT:monatlicheSparrate};
+        return { end, kosten, steuer, net, dauer, PMT };
     }
 
-    const w=calc(rw), a=calc(ra), b=calc(rb);
+    const w = calc(rw);
+    const a = calc(ra);
+    const b = calc(rb);
 
     document.getElementById("etf-box").style.display="none";
     document.getElementById("ergebnis-box").style.display="block";
 
-  let vergleichHTML="";
-if(mode=="ansparzeit") {
-    vergleichHTML=`<tr><td>Benötigte Jahre</td>
-        <td>${w.dauer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-        <td>${a.dauer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-        <td>${b.dauer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+    let vergleichHTML = "";
+
+   // --- Hilfsfunktion für deutsche Euro-Darstellung ---
+function euro(x){
+    return x.toLocaleString("de-DE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + " €";
+}
+
+// --- Vergleichstabelle ---
+if(mode==="ansparzeit"){
+    vergleichHTML = `
+    <tr><td>Benötigte Jahre</td>
+        <td>${w.dauer.toFixed(2)}</td>
+        <td>${a.dauer.toFixed(2)}</td>
+        <td>${b.dauer.toFixed(2)}</td>
     </tr>`;
-} else if(mode=="sparrate") {
-    vergleichHTML=`<tr><td>Monatliche Sparrate</td>
-        <td>${w.PMT.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${a.PMT.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${b.PMT.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
+} else if(mode==="sparrate"){
+    vergleichHTML = `
+    <tr><td>Monatliche Sparrate</td>
+        <td>${euro(w.PMT)}</td>
+        <td>${euro(a.PMT)}</td>
+        <td>${euro(b.PMT)}</td>
     </tr>`;
 } else {
-    vergleichHTML=`<tr><td>Endkapital</td>
-        <td>${w.end.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${a.end.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${b.end.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
+    vergleichHTML = `
+    <tr><td>Endkapital</td>
+        <td>${euro(w.end)}</td>
+        <td>${euro(a.end)}</td>
+        <td>${euro(b.end)}</td>
     </tr>
     <tr><td>TER-Kosten</td>
-        <td>${w.kosten.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${a.kosten.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${b.kosten.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
+        <td>${euro(w.kosten)}</td>
+        <td>${euro(a.kosten)}</td>
+        <td>${euro(b.kosten)}</td>
     </tr>
-    <tr><td>Steuern</td>
-        <td>${w.steuer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${a.steuer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
-        <td>${b.steuer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</td>
+    <tr><td>Steuern (nur Gewinn)</td>
+        <td>${euro(w.steuer)}</td>
+        <td>${euro(a.steuer)}</td>
+        <td>${euro(b.steuer)}</td>
     </tr>
     <tr><th>Netto-Endkapital</th>
-        <th>${w.net.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</th>
-        <th>${a.net.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</th>
-        <th>${b.net.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</th>
+        <th>${euro(w.net)}</th>
+        <th>${euro(a.net)}</th>
+        <th>${euro(b.net)}</th>
     </tr>`;
 }
-    document.getElementById("vergleich").innerHTML=vergleichHTML;
+
+
+
+
+/* ====== HIER BEGINNT DER FIX ====== */
+
 // Zusätzlicher Text nur beim Endkapital-Modus
 const extraTextContainer = document.getElementById("ergebnis-box");
+const existingText = document.getElementById("endkapital-text");
+if(existingText) existingText.remove();
+
 if(mode === "endkapital") {
-    let text = `<p style="margin-top:20px; font-style:italic;">
-   Jährliche Vorabpauschale ca. 20 € pro 10.000€; jährlicher Freibetrag von 1000€ 
-    </p>`;
-    // Prüfen, ob schon ein Text vorhanden ist, ggf. alten Text entfernen
-    const existingText = document.getElementById("endkapital-text");
-    if(existingText) existingText.remove();
-    // Text erstellen
-    const p = document.createElement("div");    
+    const p = document.createElement("div");
     p.id = "endkapital-text";
-    p.innerHTML = text;
+    p.innerHTML = `
+        <p style="margin-top:20px; font-style:italic;">
+        Jährliche Vorabpauschale ca. 20€ pro 10.000 €;<br>
+        Jährlicher Freibetrag von 1.000€/ 2.000€ bei Verheirateten
+        </p>`;
     extraTextContainer.appendChild(p);
 }
-    // Eingaben anzeigen
-let infoHTML=`<p><strong>Modus:</strong> ${mode}</p>`;
-if(mode=="endkapital"||mode=="sparrate") infoHTML+=`<p><strong>Startkapital:</strong> ${PV.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p>`;
-if(mode=="endkapital") infoHTML+=`<p><strong>Monatliche Sparrate:</strong> ${PMT.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p><p><strong>Anlagedauer:</strong> ${jahre} Jahre</p>`;
-if(mode=="sparrate") infoHTML+=`<p><strong>Zielkapital:</strong> ${ziel.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p><p><strong>Anlagedauer:</strong> ${jahre} Jahre</p>`;
-if(mode=="ansparzeit") infoHTML+=`<p><strong>Monatliche Sparrate:</strong> ${PMT.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p><p><strong>Zielkapital:</strong> ${ziel.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} €</p><p><strong>Benötigte Dauer:</strong> ${a.dauer.toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})} Jahre</p>`;
-if(zins>0) infoHTML+=`<p><strong>Jahreszins:</strong> ${(zins*100).toLocaleString("de-DE",{minimumFractionDigits:2, maximumFractionDigits:2})}%</p>`;
-document.getElementById("info-inputs").innerHTML=infoHTML;
 
-    const etfBox=document.getElementById("info-etfs");
-    etfBox.innerHTML="";
-    selectedETFs.forEach(e=> etfBox.innerHTML+=`<p><strong>${(e.weight*100).toFixed(0)}%</strong><br>${e.name}<br><small>WKN: ${e.wkn}</small></p>`);
+// --- Hilfsfunktion für deutsche Euro-Darstellung ---
+function euro(x){
+    return x.toLocaleString("de-DE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + " €";
 }
 
+// --- Eingaben anzeigen ---
+// --- Eingaben anzeigen inklusive investiertes Kapital ---
+let infoHTML = `<p><strong>Modus:</strong> ${mode}</p>`;
 
+if(mode=="endkapital"||mode=="sparrate")
+    infoHTML += `<p><strong>Startkapital:</strong> ${euro(PV)}</p>`;
+
+if(mode=="endkapital")
+    infoHTML += `<p><strong>Monatliche Sparrate:</strong> ${euro(PMT_INPUT)}</p>
+                 <p><strong>Anlagedauer:</strong> ${jahre} Jahre</p>`;
+
+if(mode=="sparrate")
+    infoHTML += `<p><strong>Zielkapital:</strong> ${euro(ziel)}</p>
+                 <p><strong>Anlagedauer:</strong> ${jahre} Jahre</p>`;
+
+if(mode=="ansparzeit")
+    infoHTML += `<p><strong>Monatliche Sparrate:</strong> ${euro(PMT_INPUT)}</p>
+                 <p><strong>Zielkapital:</strong> ${euro(ziel)}</p>
+                 <p><strong>Benötigte Dauer:</strong> ${a.dauer.toFixed(2)} Jahre</p>`;
+
+if(zins>0)
+    infoHTML += `<p><strong>Jahreszins:</strong> ${(zins*100).toFixed(2)}%</p>`;
+
+// --- Investiertes Kapital berechnen ---
+let investiertesKapital = PV + PMT_INPUT * 12 * jahre;
+infoHTML += `<p><strong>Investiertes Kapital:</strong> ${euro(investiertesKapital)}</p>`;
+
+
+document.getElementById("info-inputs").innerHTML = infoHTML;
+
+// --- ETF-Allokation anzeigen inklusive Betrag ---
+const etfBox = document.getElementById("info-etfs");
+etfBox.innerHTML = "";
+
+// Gesamtinvestition: Startkapital + monatliche Sparrate * Monate
+let gesamtInvest = PV + PMT_INPUT * 12 * jahre;
+
+selectedETFs.forEach(e=>{
+    let invest = gesamtInvest * e.weight;  // Betrag pro ETF
+    etfBox.innerHTML += `
+        <p>
+            <strong>${(e.weight*100).toFixed(0)}%</strong> 
+            ${e.name}<br>
+            <small>WKN: ${e.wkn} – TER: ${(e.ter*100).toFixed(2)}%</small>
+        </p>`;
+});
+
+    document.getElementById("vergleich").innerHTML = vergleichHTML;
+}
+
+/* ====== FIX ENDE ====== */
 </script>
 </body>
 </html>
