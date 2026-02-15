@@ -30,6 +30,21 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 #etf-box { align-items:flex-start; }
 #etf-box h2 { align-self:center; margin-bottom:20px; }
 #etf-tables { width:100%; display:flex; flex-direction:column; align-items:center; }
+.custom-flex {
+    display:flex;
+    gap:25px;
+    align-items:flex-start;
+}
+
+.custom-left { flex:2; }
+.custom-right { flex:1; }
+
+.add-box {
+    background:#f9f9f9;
+    padding:15px;
+    border-radius:10px;
+    border:1px solid #ddd;
+}
 </style>
 </head>
 <body>
@@ -56,9 +71,13 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 <div class="box box-small" id="strategy-box" style="display:none;">
     <h2>ETF-Strategie auswählen</h2>
     <div class="strategy-grid">
+<div class="strategy-card" onclick="selectStrategy(4)">
+    Customize<br><strong>frei wählbar</strong>
+</div>
         <div class="strategy-card" onclick="selectStrategy(1)">1 ETF<br><strong>100%</strong></div>
         <div class="strategy-card" onclick="selectStrategy(2)">2 ETFs<br><strong>70 / 30</strong></div>
         <div class="strategy-card" onclick="selectStrategy(3)">3 ETFs<br><strong>50 / 30 / 20</strong></div>
+        
     </div>
     <button onclick="goToEtfs()">Weiter</button>
 </div>
@@ -67,9 +86,80 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 <div class="box" id="etf-box" style="display:none;">
     <h2>ETF-Auswahl</h2>
     <div id="etf-tables"></div>
-    <button onclick="berechnen()">Berechnen</button>
+
+   <div id="etf-info" style="
+    margin-top:15px;
+    padding:15px;
+    background:#f6fff6;
+    border-left:5px solid #4CAF50;
+    border-radius:8px;
+    display:flex;
+    gap:15px;
+    flex-wrap:wrap;
+    justify-content:flex-start;
+">
 </div>
 
+
+<!-- CUSTOMIZE BUILDER -->
+<div class="box box-small" id="custom-box" style="display:none;">
+    <h2>Customize Portfolio</h2>
+
+    <!-- Schritt 1 -->
+    <div id="custom-step1">
+        <label>Wie viele ETFs möchtest du?</label>
+        <input id="custom-count" type="number" min="1" max="100">
+        <button onclick="customStep1()">Weiter</button>
+    </div>
+
+    <!-- Schritt 2 -->
+    <div id="custom-step2" style="display:none;">
+        <h3>ETFs auswählen</h3>
+        <div class="custom-flex">
+
+    <div class="custom-left">
+        <div id="custom-table"></div>
+    </div>
+
+    <div class="custom-right">
+        <div class="add-box">
+
+            <h3>Eigenen ETF hinzufügen</h3>
+
+            <input id="new-wkn" placeholder="WKN">
+            <input id="new-name" placeholder="Name">
+            <input id="new-ter" type="number" step="0.01" placeholder="TER %">
+            <input id="new-pos" type="number" placeholder="Aktienanzahl">
+            <input id="new-tf" type="number" step="1" placeholder="Teilfreistellung %">
+
+          
+
+            <button onclick="addCustomETF()">
+                ETF hinzufügen
+            </button>
+
+        </div>
+    </div>
+
+</div>
+        <button onclick="customStep2()">Weiter</button>
+    </div>
+
+    <!-- Schritt 3 -->
+    <div id="custom-step3" style="display:none;">
+        <h3>Gewichtung (%)</h3>
+        <div id="weight-inputs"></div>
+        <button onclick="finishCustom()">Fertig</button>
+    </div>
+</div>
+
+
+    <button id="calc-btn"
+        onclick="berechnen()"
+        style="display:none;">
+    Berechnen
+</button>
+</div>
 <!-- 5. Ergebnis -->
 <div class="box" id="ergebnis-box" style="display:none;">
     <h2>Ergebnis – Szenariovergleich</h2>
@@ -91,8 +181,9 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
             <h3>Deine Eingaben</h3>
             <div id="info-inputs"></div>
             <hr>
-            <h3>Deine ETF-Allokation</h3>
-            <div id="info-etfs"></div>
+           <h3>Deine ETF-Allokation</h3>
+<div id="info-etfs"></div>
+
         </div>
     </div>
 </div>
@@ -100,16 +191,394 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 <script>
 let mode = null;
 let strategy = null;
+let customCount = 0;
+let customWeights = [];
+let customUserETFs = [];
+let customOnlyETFs = [];
 
 
 // --- ETF Daten ---
 const etfData = {
-    world5:[{wkn:"A2PKXG",name:"Vanguard FTSE All-World",ter:0.0019,pos:"3.622"},{wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225"},{wkn:"A0RPWH",name:"iShares Core MSCI World",ter:0.0020,pos:"1.322"},{wkn:"A1XB5U",name:"Xtrackers MSCI World",ter:0.0012,pos:"1.454"},{wkn:"A2N6CW",name:"SPDR MSCI World",ter:0.0012,pos:"1.313"}],
-    world3:[{wkn:"A2PKXG",name:"Vanguard FTSE All-World",ter:0.0019,pos:"3.622"},{wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225"},{wkn:"WELT0A",name:"L&G Gerd Kommer Multifactor Equity",ter:0.0045,pos:"4.105"}],
-    em3:[{wkn:"A0RPWJ",name:"iShares MSCI EM",ter:0.0018,pos:"1.193"},{wkn:"A1JCMZ",name:"HSBC MSCI Emerging Markets",ter:0.0015,pos:"1.196"},{wkn:"A1JJTE",name:"SPDR MSCI Emerging Markets",ter:0.0018,pos:"1.167"},{wkn:"A2QAFK",name:"iShares MSCI EM ex-China",ter:0.0018,pos:"637"}],
-    variable4:[{wkn:"A0RPWG",name:"iShares Core MSCI Europe",ter:0.0012,pos:"403"},{wkn:"A0YEDG",name:"iShares Core S&P 500 UCITS ETF",ter:0.0007,pos:"503"},{wkn:"A2DWBY",name:"iShares MSCI World Small Cap",ter:0.0035,pos:"3.400"}]
+    world5:[{wkn:"A2PKXG",name:"Vanguard FTSE All-World",ter:0.0019,pos:"3.622",tf: 0.30 },{wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225",tf: 0.30 },{wkn:"A0RPWH",name:"iShares Core MSCI World",ter:0.0020,pos:"1.322",tf: 0.30 },{wkn:"A1XB5U",name:"Xtrackers MSCI World",ter:0.0012,pos:"1.454",tf: 0.30 },{wkn:"A2N6CW",name:"SPDR MSCI World",ter:0.0012,pos:"1.313",tf: 0.30 }],
+    world3:[{wkn:"A2PKXG",name:"Vanguard FTSE All-World",ter:0.0019,pos:"3.622",tf: 0.30 },{wkn:"A1JJTD",name:"SPDR MSCI All Country World",ter:0.0017,pos:"4.225"},{wkn:"WELT0A",name:"L&G Gerd Kommer Multifactor Equity",ter:0.0045,pos:"4.105"}],
+    em3:[{wkn:"A0RPWJ",name:"iShares MSCI EM",ter:0.0018,pos:"1.193",tf: 0.30 },{wkn:"A1JCMZ",name:"HSBC MSCI Emerging Markets",ter:0.0015,pos:"1.196",tf: 0.30 },{wkn:"A1JJTE",name:"SPDR MSCI Emerging Markets",ter:0.0018,pos:"1.167",tf: 0.30 },{wkn:"A2QAFK",name:"iShares MSCI EM ex-China",ter:0.0018,pos:"637",}],
+    variable4:[{wkn:"A0RPWG",name:"iShares Core MSCI Europe",ter:0.0012,pos:"403",tf: 0.30 },{wkn:"A0YEDG",name:"iShares Core S&P 500 UCITS ETF",ter:0.0007,pos:"503",tf: 0.30 },{wkn:"DBX0WG",name:"Xtrackers MSCI World Small Cap",ter:0.0025,pos:"3.099",tf: 0.30 }]
 };
+
+// ===== FESTER CUSTOM ETF =====
+customOnlyETFs.push({
+    wkn: "LYX0Q0",
+    name: "Amundi Core STOXX Europe 600",
+    ter: 0.0007,
+    pos: "612",
+    tf: 0.30
+});
+
 const weights = {1:[1],2:[0.7,0.3],3:[0.5,0.3,0.2]};
+// --- Zusatzinfos zu heiligen ETFs ---
+const etfInfos = {
+
+    // --- World ---
+"A1JJTD": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 4,3 Mrd €<br>
+• Top-10 Gewichtung: 22,34%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 59,57%<br>
+🇯🇵Japan 5,48%<br>
+🇬🇧Großbritannien 3,20%<br>
+🇨🇦Kanada 2,69%<br>
+🇨🇳China 2,64%
+`,
+
+"A2PKXG": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 29,5 Mrd €<br>
+• Top-10 Gewichtung: 24,15%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 58,54%<br>
+🇯🇵Japan 5,55%<br>
+🇨🇳China 3,03%<br>
+🇬🇧Großbritannien 2,99%<br>
+🇨🇦Kanada 2,81%
+`,
+
+"A0RPWH": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 111,5 Mrd €<br>
+• Top-10 Gewichtung: 27,70%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 68,25%<br>
+🇯🇵Japan 5,36%<br>
+🇬🇧Großbritannien 3,32%<br>
+🇨🇦Kanada 3,01%<br>
+🇨🇭Schweiz 2,54%
+`,
+
+"A1XB5U": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 16,6 Mrd €<br>
+• Top-10 Gewichtung: 27,10%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 68,10%<br>
+🇯🇵Japan 5,44%<br>
+🇬🇧Großbritannien 3,31%<br>
+🇨🇦Kanada 3,00%<br>
+🇨🇭Schweiz 2,53%
+`,
+
+"A2N6CW": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 14,1 Mrd €<br>
+• Top-10 Gewichtung: 27,78%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 68,40%<br>
+🇯🇵Japan 5,43%<br>
+🇬🇧Großbritannien 3,37%<br>
+🇨🇦Kanada 3,00%<br>
+🇨🇭Schweiz 2,55%
+`,
+
+"WELT0A": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 900 Mio€<br>
+• Top-10 Gewichtung: 8,77%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 43,91%<br>
+🇯🇵Japan 5,06%<br>
+🇨🇳China 4,30% <br>
+🇬🇧Großbritannien 3,37%<br>
+🇩🇪Deutschland 3,77%
+`,
+
+
+ // --- EM ---
+
+"A0RPWJ": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 6,7 Mrd €<br>
+• Top-10 Gewichtung: 30,11%<br><br>
+<b>Top 5 Länder:</b><br>
+🇨🇳China 25,54%<br>
+🇹🇼Taiwan 20,09%<br>
+🇮🇳Indien 13,53%<br>
+🇰🇷Südkorea 13,23%<br>
+🇧🇷Brasilien 3,89%
+`,
+
+"A1JCMZ": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 3,2 Mrd €<br>
+• Top-10 Gewichtung: 30,21%<br><br>
+<b>Top 5 Länder:</b><br>
+🇨🇳China 25,39%<br>
+🇹🇼Taiwan 20,43%<br>
+🇮🇳Indien 13,66%<br>
+🇰🇷Südkorea 13,26%<br>
+🇸🇦Saudi Arabien 2,82%
+`,
+
+"A1JJTE": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 1,4 Mrd €<br>
+• Top-10 Gewichtung: 30,18%<br><br>
+<b>Top 5 Länder:</b><br>
+🇨🇳China 25,46%<br>
+🇹🇼Taiwan 20,36%<br>
+🇮🇳Indien 13,72%<br>
+🇰🇷Südkorea 13,18%<br>
+🇧🇷Brasilien 3,96%
+`,
+
+"A2QAFK": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 3,9 Mrd €<br>
+• Top-10 Gewichtung: 31,61%<br><br>
+<b>Top 5 Länder:</b><br>
+🇹🇼Taiwan 28,03%%<br>
+🇮🇳Indien 18,84%<br>
+🇰🇷Südkorea 18,27%<br>
+🇧🇷Brasilien 5,37%<br>
+🇸🇦Saudi Arabien 3,90%
+`,
+
+ // --- EU Beliebiger ---
+
+"A0RPWG": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 14,9 Mrd €<br>
+• Top-10 Gewichtung: 19,43%<br><br>
+<b>Top 5 Länder:</b><br>
+🇬🇧Großbritannien 19,52%<br>
+🇫🇷Frankreich 14,51%<br>
+🇩🇪Deutschland 14,40%<br>
+🇨🇭Schweiz 14,39%<br>
+🇳🇱Niederlande 8,46%
+`, 
+
+"A0YEDG": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 113,9 Mrd €<br>
+• Top-10 Gewichtung: 39,61%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 95,64%<br>
+🇮🇪Irland 1,42%<br>
+Sonstige 2,94%
+`, 
+
+"DBX0WG": `
+• Thesaurierend<br>
+• Fondsdomizil: Irland<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 83 Mio €<br>
+• Top-10 Gewichtung: 3,05%<br><br>
+<b>Top 5 Länder:</b><br>
+🇺🇸USA 53,26%<br>
+🇯🇵Japan 12,05%<br>
+🇦🇺Australien 4,41% <br>
+🇨🇦Kanada 4,07% <br>
+🇬🇧Großbritannien 3,52%
+`, 
+
+// --- Customize ---
+
+"LYX0Q0": `
+• Thesaurierend<br>
+• Fondsdomizil: Luxemburg<br>
+• 30% Teilfreistellung<br>
+• Fondsgröße: 16,7 Mrd €<br>
+• Top-10 Gewichtung: 18,56%<br><br>
+<b>Top 5 Länder:</b><br>
+🇬🇧Großbritannien 20,04%<br>
+🇫🇷Frankreich 13,93%<br>
+🇨🇭Schweiz 13,92%<br>
+🇩🇪Deutschland 13,79%<br>
+🇳🇱Niederlande 7,97%
+`,
+
+};
+
+// --- VERSTECKTE LÄNDERDATEN AUS PDF ---
+const etfCountries = {
+
+"A2PKXG": {
+ "🇺🇸USA":58.54,"🇯🇵Japan":5.55,"🇨🇳China":3.03,"🇬🇧Großbritannien":2.99,
+ "🇨🇦Kanada":2.81,"🇨🇭Schweiz":2.24,"🇹🇼Taiwan":2.24,"🇩🇪Deutschland":2.04,
+ "🇫🇷Frankreich":1.94,"🇮🇳Indien":1.70,"🇦🇺Australien":1.52,"🇰🇷Südkorea":1.51,
+ "🇳🇱Niederlande":1.25,"🇮🇪Irland":1.05,"Sonstige":11.59
+},
+
+"A1JJTD": {
+ "🇺🇸USA":59.57,"🇯🇵Japan":5.48,"🇬🇧Großbritannien":3.20,"🇨🇦Kanada":2.69,
+ "🇨🇳China":2.64,"🇹🇼Taiwan":2.26,"🇫🇷Frankreich":2.10,"🇨🇭Schweiz":2.08,
+ "🇩🇪Deutschland":2.05,"🇮🇳Indien":1.62,"🇦🇺Australien":1.54,"🇰🇷Südkorea":1.49,
+ "🇳🇱Niederlande":1.25,"🇮🇪Irland":1.05,"Sonstige":10.98
+},
+
+"WELT0A": {
+ "🇺🇸USA":43.91,"🇯🇵Japan":5.06,"🇨🇳China":4.30,"🇬🇧Großbritannien":3.91,
+ "🇩🇪Deutschland":3.77,"🇫🇷Frankreich":3.04,"🇨🇦Kanada":2.92,"🇮🇳Indien":2.89,
+ "🇨🇭Schweiz":2.25,"🇰🇷Südkorea":2.25,"🇦🇺Australien":2.17,"🇹🇼Taiwan":1.87,
+ "🇪🇸Spanien":1.50,"🇮🇹Italien":1.44,"🇳🇱Niederlande":1.34,"🇭🇰Hongkong":1.21,
+ "🇸🇪Schweden":1.14,"🇮🇪Irland":1.07,"Sonstige":13.96
+},
+
+"A0RPWH": {
+ "🇺🇸USA":68.25,"🇯🇵Japan":5.36,"🇬🇧Großbritannien":3.32,"🇨🇦Kanada":3.01,
+ "🇨🇭Schweiz":2.54,"🇫🇷Frankreich":2.39,"🇩🇪Deutschland":2.36,
+ "🇦🇺Australien":1.52,"🇳🇱Niederlande":1.45,"🇮🇪Irland":1.25,
+ "Sonstige":8.55
+},
+
+"A1XB5U": {
+ "🇺🇸USA":68.10,"🇯🇵Japan":5.44,"🇬🇧Großbritannien":3.31,"🇨🇦Kanada":3.00,
+ "🇨🇭Schweiz":2.53,"🇩🇪Deutschland":2.38,"🇫🇷Frankreich":2.36,
+ "🇦🇺Australien":1.52,"🇳🇱Niederlande":1.51,"🇮🇪Irland":1.24,
+ "Sonstige":8.61
+},
+
+"A2N6CW": {
+ "🇺🇸USA":68.40,"🇯🇵Japan":5.43,"🇬🇧Großbritannien":3.37,"🇨🇦Kanada":3.00,
+ "🇨🇭Schweiz":2.55,"🇫🇷Frankreich":2.41,"🇩🇪Deutschland":2.39,
+ "🇦🇺Australien":1.54,"🇳🇱Niederlande":1.42,"🇮🇪Irland":1.28,
+ "Sonstige":8.21
+},
+
+// ===== EM ETFs =====
+
+"A0RPWJ": {
+ "🇨🇳China":25.54,"🇹🇼Taiwan":20.09,"🇮🇳Indien":13.53,"🇰🇷Südkorea":13.23,
+ "🇧🇷Brasilien":3.89,"🇸🇦Saudi-Arabien":2.79,"🇿🇦Südafrika":2.75,
+ "🇲🇽Mexiko":1.76,"🇦🇪VAE":1.31,"🇲🇾Malaysia":1.22,
+ "🇵🇱Polen":1.04,"🇮🇩Indonesien":1.02,"🇭🇰Hongkong":1.02,
+ "Sonstige":10.81
+},
+
+"A1JCMZ": {
+ "🇨🇳China":25.39,"🇹🇼Taiwan":20.43,"🇮🇳Indien":13.66,"🇰🇷Südkorea":13.26,
+ "🇸🇦Saudi-Arabien":2.82,"🇿🇦Südafrika":2.75,"🇧🇷Brasilien":2.06,
+ "🇲🇽Mexiko":1.76,"🇦🇪VAE":1.32,"🇲🇾Malaysia":1.20,
+ "🇭🇰Hongkong":1.03,"🇵🇱Polen":1.03,"🇮🇩Indonesien":1.03,
+ "Sonstige":12.26
+},
+
+"A1JJTE": {
+ "🇨🇳China":25.46,"🇹🇼Taiwan":20.36,"🇮🇳Indien":13.72,"🇰🇷Südkorea":13.18,
+ "🇧🇷Brasilien":3.96,"🇸🇦Saudi-Arabien":2.89,"🇿🇦Südafrika":2.79,
+ "🇲🇽Mexiko":1.77,"🇦🇪VAE":1.41,"🇲🇾Malaysia":1.19,
+ "🇭🇰Hongkong":1.07,"🇮🇩Indonesien":1.05,"🇵🇱Polen":1.02,
+ "Sonstige":10.13
+},
+
+"A2QAFK": {
+ "🇹🇼Taiwan":28.03,"🇮🇳Indien":18.84,"🇰🇷Südkorea":18.27,"🇧🇷Brasilien":5.37,
+ "🇸🇦Saudi-Arabien":3.90,"🇿🇦Südafrika":3.76,"🇲🇽Mexiko":2.42,
+ "🇦🇪VAE":1.82,"🇲🇾Malaysia":1.67,"🇮🇩Indonesien":1.43,
+ "🇵🇱Polen":1.41,"🇹🇭Thailand":1.22,"Sonstige":11.86
+},
+
+// ===== Weitere ETFs =====
+
+"A0RPWG": {
+ "🇬🇧Großbritannien":19.52,"🇫🇷Frankreich":14.51,"🇩🇪Deutschland":14.40,
+ "🇨🇭Schweiz":14.39,"🇳🇱Niederlande":8.46,"🇪🇸Spanien":5.47,
+ "🇸🇪Schweden":4.63,"🇮🇹Italien":4.55,"🇩🇰Dänemark":1.65,
+ "🇫🇮Finnland":1.53,"🇮🇪Irland":1.27,"🇧🇪Belgien":1.24,
+ "Sonstige":8.38
+},
+
+"A0YEDG": {
+ "🇺🇸USA":95.64,"🇮🇪Irland":1.42,"Sonstige":2.94
+},
+
+"DBX0WG": {
+ "🇺🇸USA":53.26,"🇯🇵Japan":12.05,"🇦🇺Australien":4.41,"🇨🇦Kanada":4.07,
+ "🇬🇧Großbritannien":3.52,"🇮🇱Israel":2.23,"🇸🇬Singapur":1.28,
+ "🇸🇪Schweden":1.26,"Sonstige":17.92
+},
+
+// ===== Customize ETFs =====
+
+"LYX0Q0": {
+ "🇬🇧Großbritannien":20.04,
+ "🇫🇷Frankreich":13.93,
+ "🇨🇭Schweiz":13.92,
+ "🇩🇪Deutschland":13.78,
+ "🇳🇱Niederlande":7.97,
+ "🇪🇸Spanien":5.26,
+ "🇮🇹Italien":4.77,
+ "🇸🇪Schweden":4.61,
+ "🇩🇰Dänemark":1.86,
+ "🇫🇮Finnland":1.64,
+ "🇧🇪Belgien":1.39,
+ "🇮🇪Irland":1.05,
+ "Sonstige":9.78
+},
+
+};
+
+// ====== FUNKTION: Auswahl anzeigen ======
+function updateETFInfos(){
+    const infoBox = document.getElementById("etf-info");
+    infoBox.innerHTML = "";
+    infoBox.style.display = "flex";
+
+    // alle ausgewählten ETFs
+
+    const radios =
+     document.querySelectorAll(
+     "#etf-box input[type='radio']:checked, " +
+     "#custom-box input[type='checkbox']:checked"
+);
+    if(radios.length === 0) return;
+
+    radios.forEach(r=>{
+        const row = r.closest("tr");
+        const wkn = row.children[1].innerText;
+        const nameETF = row.children[2].innerText;
+
+        const div = document.createElement("div");
+        div.style.background="#f6fff6";
+        div.style.padding="10px";
+        div.style.border="1px solid #4CAF50";
+        div.style.borderRadius="8px";
+        div.style.flex="1";
+        div.style.minWidth="250px";
+
+        if(etfInfos[wkn]){
+            div.innerHTML = `<strong>${nameETF}</strong><br>${etfInfos[wkn]}`;
+        } else {
+            div.innerHTML = `<strong>${nameETF}</strong><br>Keine Zusatzinformationen vorhanden.`;
+        }
+
+        infoBox.appendChild(div);
+    });
+}
+
 
 // --- Zinsen Szenarien ---
 function getZinsen(jahre){
@@ -139,12 +608,19 @@ function berechneJahre(pv, pmt, ziel, zins){
 
 // --- Modus Auswahl ---
 function selectMode(m, el){
+
     mode = m;
-    document.querySelectorAll("#mode-box .strategy-card").forEach(c=>c.classList.remove("active"));
+
+    document.querySelectorAll("#mode-box .strategy-card")
+        .forEach(c => c.classList.remove("active"));
+
     el.classList.add("active");
-    document.getElementById("mode-box").style.display="none";
+
+    document.getElementById("mode-box").style.display = "none";
+
     const container = document.getElementById("inputs-container");
-    container.innerHTML="";
+    container.innerHTML = "";
+
     if(mode=="endkapital"){
         document.getElementById("input-title").innerText="Endkapital berechnen";
         container.innerHTML=`
@@ -153,6 +629,7 @@ function selectMode(m, el){
             <input id="jahre" type="number" placeholder="Anlagedauer (Jahre)">
             <input id="zins" type="number" placeholder="Jahreszins optional (%)">`;
     }
+
     if(mode=="sparrate"){
         document.getElementById("input-title").innerText="Benötigte Sparrate berechnen";
         container.innerHTML=`
@@ -161,6 +638,7 @@ function selectMode(m, el){
             <input id="jahre" type="number" placeholder="Anlagedauer (Jahre)">
             <input id="zins" type="number" placeholder="Jahreszins optional (%)">`;
     }
+
     if(mode=="ansparzeit"){
         document.getElementById("input-title").innerText="Benötigte Ansparzeit berechnen";
         container.innerHTML=`
@@ -169,37 +647,163 @@ function selectMode(m, el){
             <input id="ziel" type="number" placeholder="Zielkapital (€)">
             <input id="zins" type="number" placeholder="Jahreszins optional (%)">`;
     }
-    document.getElementById("input-box").style.display="block";
+
+    document.getElementById("input-box").style.display = "block";
 }
+
 
 // --- Strategie Auswahl ---
 function selectStrategy(n){
+
     strategy = n;
+
     document.querySelectorAll("#strategy-box .strategy-card")
         .forEach(c => c.classList.remove("active"));
-    document.querySelectorAll("#strategy-box .strategy-card")[n-1]
-        .classList.add("active");
+
+    // aktive Karte = die angeklickte
+    event.currentTarget.classList.add("active");
 }
+
 function goToStrategy(){
     if(!mode){
         alert("Bitte zuerst einen Modus auswählen");
         return;
     }
+
+
+  // ===== CUSTOM STRATEGIE =====
+
+function askCustomWeights(){
+
+    customWeights = [];
+    let total = 0;
+
+    for(let i=1; i<=customCount; i++){
+
+        const w = prompt(`Gewichtung ETF ${i} in %:`);
+
+        if(!w){
+            alert("Abgebrochen");
+            return;
+        }
+
+        const val = parseFloat(w);
+
+        if(val <= 0){
+            alert("Ungültige Eingabe");
+            return;
+        }
+
+        customWeights.push(val / 100);
+        total += val;
+    }
+
+    if(Math.round(total) !== 100){
+        alert("Summe muss 100% ergeben!");
+        return;
+    }
+
+    showCustomETFSelection();
+}
+
     document.getElementById("input-box").style.display="none";
     document.getElementById("strategy-box").style.display="block";
+
+
+}
+
+function addCustomETF(){
+
+    const wkn = document.getElementById("new-wkn").value || "CUSTOM";
+    const name = document.getElementById("new-name").value || "Eigener ETF";
+
+    const ter = (parseFloat(document.getElementById("new-ter").value) || 0) / 100;
+    const pos = document.getElementById("new-pos").value || "0";
+    const tf = (parseFloat(document.getElementById("new-tf").value) || 0) / 100;
+
+    const newETF = { wkn, name, ter, pos, tf };
+
+    customOnlyETFs.push(newETF);
+
+    alert("ETF hinzugefügt ✔");
+
+    buildCustomTable(); // Tabelle neu laden
 }
 
 // --- ETF Auswahl ---
-function goToEtfs(){
-    if(!strategy){ alert("Bitte Strategie auswählen"); return;}
+
+
+function showCustomETFSelection(){
+
     document.getElementById("strategy-box").style.display="none";
+
     const container = document.getElementById("etf-tables");
-    container.innerHTML="";
-    if(strategy==1) container.innerHTML+=createTable("World ETF 100%", etfData.world3,"etf1");
-    if(strategy==2){ container.innerHTML+=createTable("World ETF 70%", etfData.world5,"etf2w"); container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf2em"); }
-    if(strategy==3){ container.innerHTML+=createTable("World ETF 50%", etfData.world5,"etf3w"); container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf3em"); container.innerHTML+=createTable("Beliebiger ETF 20%", etfData.variable4,"etf3s"); }
+    container.innerHTML = "";
+
+    const allEtfs = etfData.world5.concat(etfData.em3).concat(etfData.variable4);
+
+    for(let i=0; i<customCount; i++){
+
+        const percent = (customWeights[i] * 100).toFixed(0);
+
+        container.innerHTML += createTable(
+            `ETF ${i+1} — ${percent}%`,
+            allEtfs,
+            "custom" + i
+        );
+    }
+
     document.getElementById("etf-box").style.display="block";
 }
+
+function goToEtfs(){
+
+    if(!strategy){
+        alert("Bitte Strategie auswählen");
+        return;
+    }
+
+    document.getElementById("strategy-box").style.display="none";
+
+    const container = document.getElementById("etf-tables");
+    container.innerHTML="";
+
+    // ===== CUSTOM =====
+    if(strategy == 4){
+
+        document.getElementById("etf-box").style.display="block";
+        document.getElementById("custom-box").style.display="block";
+
+        // Berechnen erst nach Gewichtung!
+        document.getElementById("calc-btn").style.display="none";
+
+        return;
+    }
+
+    // ===== NORMALE STRATEGIEN =====
+
+    if(strategy==1)
+        container.innerHTML+=createTable("World ETF 100%", etfData.world3,"etf1");
+
+    if(strategy==2){
+        container.innerHTML+=createTable("World ETF 70%", etfData.world5,"etf2w");
+        container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf2em");
+    }
+
+    if(strategy==3){
+        container.innerHTML+=createTable("World ETF 50%", etfData.world5,"etf3w");
+        container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf3em");
+        container.innerHTML+=createTable("Beliebiger ETF 20%", etfData.variable4,"etf3s");
+    }
+
+    document.getElementById("etf-box").style.display="block";
+    document.getElementById("custom-box").style.display="none";
+
+    // Hier darf sofort berechnet werden
+    document.getElementById("calc-btn").style.display="block";
+}
+
+
 function createTable(title, etfs, name){
     let html=`<h3>${title}</h3><table><thead><tr><th></th><th>WKN</th><th>Name</th><th>TER</th><th>Aktien</th></tr></thead><tbody>`;
     etfs.forEach((e,i)=> html+=`<tr class="etf-row"><td><input type="radio" name="${name}" value="${i}"></td><td>${e.wkn}</td><td>${e.name}</td><td>${(e.ter*100).toFixed(2)}%</td><td>${e.pos}</td></tr>`);
@@ -207,15 +811,38 @@ function createTable(title, etfs, name){
     return html;
 }
 document.addEventListener("click", e=>{
+
     const row = e.target.closest(".etf-row");
     if(!row) return;
+
+    // RADIO (normale Strategien)
     const radio = row.querySelector("input[type='radio']");
-    if(!radio) return;
-    const name = radio.name;
-    document.querySelectorAll(`input[name="${name}"]`).forEach(r=>r.closest("tr").classList.remove("selected"));
-    radio.checked=true;
-    row.classList.add("selected");
+    if(radio){
+
+        const name = radio.name;
+
+        document.querySelectorAll(`input[name="${name}"]`)
+            .forEach(r => r.closest("tr").classList.remove("selected"));
+
+        radio.checked = true;
+        row.classList.add("selected");
+    }
+
+    // CHECKBOX (Customize)
+    const checkbox = row.querySelector("input[type='checkbox']");
+    if(checkbox){
+
+        checkbox.checked = !checkbox.checked;
+
+        row.classList.toggle("selected", checkbox.checked);
+    }
+
+    updateETFInfos();
 });
+
+   
+
+ 
 
 // --- Berechnen ---
 function berechnen(){
@@ -247,9 +874,58 @@ function berechnen(){
         selectedETFs.push({...etfData.world5[w],weight:0.5});
         selectedETFs.push({...etfData.em3[e],weight:0.3});
         selectedETFs.push({...etfData.variable4[s],weight:0.2});
+
+    
+}
+if(strategy == 4){
+
+    selectedETFs = [];
+
+   const allETFs = [
+    ...etfData.world5,
+    ...etfData.world3,
+    ...etfData.em3,
+    ...etfData.variable4,
+   ...customOnlyETFs
+];
+
+    const checked =
+        document.querySelectorAll(
+            'input[name="custom-select"]:checked'
+        );
+
+    if(checked.length !== customCount){
+        alert("Bitte ETFs auswählen");
+        return;
     }
 
-    const gesamtTER = selectedETFs.reduce((sum,e)=>sum + e.ter * e.weight, 0);
+    checked.forEach((c,i)=>{
+        const etf = allETFs[c.value];
+
+        selectedETFs.push({
+            ...etf,
+            weight: customWeights[i]
+        });
+    });
+}
+
+
+    
+    // Gewichtete Portfolio-TER
+const portfolioTER = selectedETFs.reduce((sum,e)=>sum + e.ter * e.weight, 0);
+
+// ===== GEWICHTETE TEILFREISTELLUNG =====
+const portfolioTF = selectedETFs.reduce(
+    (sum, e) => sum + (e.tf || 0) * e.weight,
+    0
+);
+
+// steuerpflichtiger Anteil
+const steuerFaktor = 1 - portfolioTF;
+
+// Summe der Einzel-TER (ungewichtet)
+const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
+
     const [rw,ra,rb] = zins>0 ? [zins,zins,zins] : getZinsen(jahre);
 
     function calc(r){
@@ -270,9 +946,9 @@ function berechnen(){
             for(let i=0;i<50;i++){
                 let fv = berechneFV(PV, guess, r, jahre);
                 let ein = PV + guess * 12 * jahre;
-                let kosten = fv * gesamtTER * jahre;
+                let kosten = fv * portfolioTER * jahre;
                 let gewinn = Math.max(0, fv - ein);
-                let steuer = gewinn * 0.25 * 0.7;
+                let steuer = gewinn * 0.25 * steuerFaktor;
                 let net = fv - kosten - steuer;
                 guess *= ziel / net;
             }
@@ -289,9 +965,9 @@ function berechnen(){
         }
 
         // --- Kosten & Steuern (NUR auf Gewinn) ---
-        const kosten = end * gesamtTER * dauer;
+        const kosten = end * portfolioTER * dauer;
         const gewinn = Math.max(0, end - einzahlungen);
-        const steuer = gewinn * 0.25 * 0.7;
+        const steuer = gewinn * 0.25 * steuerFaktor;
         const net = end - kosten - steuer;
 
         return { end, kosten, steuer, net, dauer, PMT };
@@ -312,6 +988,9 @@ function euro(x){
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     }) + " €";
+    function percent(x){
+    return (x * 100).toFixed(2) + " %";
+}
 }
 
 // --- Vergleichstabelle ---
@@ -351,12 +1030,16 @@ if(mode==="ansparzeit"){
         <th>${euro(a.net)}</th>
         <th>${euro(b.net)}</th>
     </tr>`;
+    
+
+
+    document.getElementById("vergleich").innerHTML = vergleichHTML;
+
 }
 
 
 
 
-/* ====== HIER BEGINNT DER FIX ====== */
 
 // Zusätzlicher Text nur beim Endkapital-Modus
 const extraTextContainer = document.getElementById("ergebnis-box");
@@ -418,9 +1101,9 @@ etfBox.innerHTML = "";
 
 // Gesamtinvestition: Startkapital + monatliche Sparrate * Monate
 let gesamtInvest = PV + PMT_INPUT * 12 * jahre;
+// ===== ETF-LISTE ANZEIGEN =====
 
 selectedETFs.forEach(e=>{
-    let invest = gesamtInvest * e.weight;  // Betrag pro ETF
     etfBox.innerHTML += `
         <p>
             <strong>${(e.weight*100).toFixed(0)}%</strong> 
@@ -429,10 +1112,284 @@ selectedETFs.forEach(e=>{
         </p>`;
 });
 
-    document.getElementById("vergleich").innerHTML = vergleichHTML;
+
+// ===== TER + AKTIEN SUMME (NUR EINMAL) =====
+
+// TER korrekt in Prozent berechnen
+const portfolioTERPercent = (portfolioTER * 100).toFixed(2);
+const sumTERPercent = (sumTER * 100).toFixed(2);
+
+// Aktienanzahl korrekt summieren
+let totalStocks = selectedETFs.reduce((sum, e)=>{
+    const stocks = parseInt(e.pos.replace(/\./g, ""));
+    return sum + stocks;
+}, 0);
+
+// Anzeige unter ALLEN ETFs
+etfBox.innerHTML += `
+    <hr style="margin:15px 0;">
+    <p><strong>Portfolio-TER (gewichtet):</strong> ${portfolioTERPercent}%</p>
+    <p><strong>Summe Einzel-TER:</strong> ${sumTERPercent}%</p>
+
+    <p><strong>Zinssätze (angenommen):</strong><br>
+    Schlecht: ${ (rw*100).toFixed(2) }%<br>
+    Durchschnitt: ${ (ra*100).toFixed(2) }%<br>
+    Bester: ${ (rb*100).toFixed(2) }%
+    </p>
+
+    <p><strong>Aktien:</strong> ${totalStocks.toLocaleString("de-DE")}</p>
+`;
+
+// ===== LÄNDERALLOKATION BERECHNEN =====
+
+let countryTotal = {};
+let echteSonstige = 0;
+
+// Daten sammeln
+selectedETFs.forEach(etf => {
+
+    const data = etfCountries[etf.wkn];
+    if(!data) return;
+
+    for(const country in data){
+
+        const weighted = data[country] * etf.weight;
+
+        if(country === "Sonstige"){
+            echteSonstige += weighted;
+            continue;
+        }
+
+        countryTotal[country] =
+            (countryTotal[country] || 0) + weighted;
+    }
+});
+
+// Sortieren
+let sorted = Object.entries(countryTotal)
+    .sort((a,b)=>b[1]-a[1]);
+
+const top9 = sorted.slice(0,9);
+const restCountries = sorted.slice(9);
+
+// Aggregiertes Sonstige (eingeklappt)
+const restSum = restCountries
+    .reduce((sum,c)=>sum + c[1],0);
+
+const aggregatedSonstige = echteSonstige + restSum;
+
+
+// ===== UI =====
+
+const countryBox = document.createElement("div");
+countryBox.innerHTML = `
+    <hr>
+    <h3>Länder-Allokation</h3>
+`;
+
+// Top 9 anzeigen
+top9.forEach(([name,value])=>{
+    countryBox.innerHTML += `
+        <p>${name}: <strong>${value.toFixed(2)}%</strong></p>
+    `;
+});
+
+// Eingeklapptes Sonstige
+if(aggregatedSonstige > 0){
+
+    countryBox.innerHTML += `
+        <p id="toggleRest"
+           style="cursor:pointer; color:#4CAF50;">
+           Sonstige: <strong>${aggregatedSonstige.toFixed(2)}%</strong> ▼
+        </p>
+
+        <div id="restCountries"
+             style="display:none; margin-left:10px;">
+        </div>
+    `;
 }
 
-/* ====== FIX ENDE ====== */
+etfBox.appendChild(countryBox);
+
+
+// ===== AUFKLAPP-BEREICH =====
+
+const restBox = document.getElementById("restCountries");
+
+if(restBox){
+
+    // Alle restlichen Länder anzeigen
+    restCountries.forEach(([name,value])=>{
+        restBox.innerHTML += `
+            <p>${name}: ${value.toFixed(2)}%</p>
+        `;
+    });
+
+    // Echtes Sonstige GANZ UNTEN
+    if(echteSonstige > 0){
+        restBox.innerHTML += `
+            <p><strong>Sonstige: ${echteSonstige.toFixed(2)}%</strong></p>
+        `;
+    }
+
+    // Toggle
+    document
+      .getElementById("toggleRest")
+      .addEventListener("click", ()=>{
+
+        const visible =
+            restBox.style.display === "block";
+
+        restBox.style.display =
+            visible ? "none" : "block";
+
+        document.getElementById("toggleRest")
+            .innerHTML = `
+            Sonstige: <strong>${aggregatedSonstige.toFixed(2)}%</strong>
+            ${visible ? "▼" : "▲"}
+        `;
+    });
+}
+
+}
+
+// ===== CUSTOM STEP 1 =====
+function customStep1(){
+
+    customCount = parseInt(
+        document.getElementById("custom-count").value
+    );
+
+    if(!customCount || customCount < 1){
+        alert("Bitte gültige Anzahl eingeben");
+        return;
+    }
+
+    document.getElementById("custom-step1").style.display="none";
+    document.getElementById("custom-step2").style.display="block";
+
+    buildCustomTable();
+}
+
+
+// ===== TABELLE MIT ALLEN ETFs =====
+function buildCustomTable(){
+
+const allETFs = [
+    ...etfData.world5,
+    ...etfData.world3,
+    ...etfData.em3,
+    ...etfData.variable4,
+    ...customOnlyETFs   // NUR für Customize
+];
+
+    const container =
+        document.getElementById("custom-table");
+
+    let html = `
+    <table>
+    <thead>
+    <tr>
+        <th></th>
+        <th>WKN</th>
+        <th>Name</th>
+        <th>TER</th>
+        <th>Aktien</th>
+    </tr>
+    </thead>
+    <tbody>
+    `;
+
+    allETFs.forEach((e,i)=>{
+        html += `
+        <tr class="etf-row">
+            <td>
+              <input type="checkbox"
+                     name="custom-select"
+                     value="${i}">
+            </td>
+            <td>${e.wkn}</td>
+            <td>${e.name}</td>
+            <td>${(e.ter*100).toFixed(2)}%</td>
+            <td>${e.pos}</td>
+        </tr>`;
+    });
+
+    html += "</tbody></table>";
+
+    container.innerHTML = html;
+}
+
+
+// ===== STEP 2 — AUSWAHL PRÜFEN =====
+function customStep2(){
+
+    const selected =
+        document.querySelectorAll(
+            'input[name="custom-select"]:checked'
+        );
+
+    if(selected.length !== customCount){
+        alert(`Bitte genau ${customCount} ETFs auswählen`);
+        return;
+    }
+
+    document.getElementById("custom-step2").style.display="none";
+    document.getElementById("custom-step3").style.display="block";
+
+    const container =
+        document.getElementById("weight-inputs");
+
+    container.innerHTML = "";
+
+  selected.forEach((c,i)=>{
+
+    const row = c.closest("tr");
+    const name = row.children[2].innerText;
+
+    container.innerHTML += `
+        <label>${name} Gewicht (%)</label>
+        <input type="number" id="w${i}">
+    `;
+});
+}
+
+
+// ===== STEP 3 — GEWICHTUNG =====
+ function finishCustom(){
+
+    const weights = [];
+
+    for(let i=0;i<customCount;i++){
+
+        const val = parseFloat(
+            document.getElementById(`w${i}`).value
+        );
+
+        if(!val){
+            alert("Alle Gewichte eingeben");
+            return;
+        }
+
+        weights.push(val);
+    }
+
+    const sum = weights.reduce((a,b)=>a+b,0);
+
+    if(Math.round(sum) !== 100){
+        alert("Summe muss 100% sein");
+        return;
+    }
+
+    customWeights = weights.map(w=>w/100);
+
+    // Schritt 3 ausblenden
+    document.getElementById("custom-step3").style.display="none";
+
+    // Berechnen-Button sofort anzeigen
+    document.getElementById("calc-btn").style.display="block";
+}
+
 </script>
 </body>
-</html>
+</html> 
