@@ -929,6 +929,7 @@ const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
     const [rw,ra,rb] = zins>0 ? [zins,zins,zins] : getZinsen(jahre);
 
     function calc(r){
+        const effektiverZins = Math.max(r - portfolioTER, -0.99);
         let end = 0;
         let dauer = jahre;
         let PMT = PMT_INPUT;
@@ -936,39 +937,67 @@ const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
 
         // --- Endkapital ---
         if(mode==="endkapital"){
-            end = berechneFV(PV, PMT, r, jahre);
+            const effektiverZins = Math.max(r - portfolioTER, -0.99);
+            end = berechneFV(PV, PMT, effektiverZins, jahre);
             einzahlungen = PV + PMT * 12 * jahre;
         }
 
-        // --- Sparrate ---
-        if(mode==="sparrate"){
-            let guess = 100;
-            for(let i=0;i<50;i++){
-                let fv = berechneFV(PV, guess, r, jahre);
-                let ein = PV + guess * 12 * jahre;
-                let kosten = fv * portfolioTER * jahre;
-                let gewinn = Math.max(0, fv - ein);
-                let steuer = gewinn * 0.25 * steuerFaktor;
-                let net = fv - kosten - steuer;
-                guess *= ziel / net;
-            }
-            PMT = guess;
-            end = berechneFV(PV, PMT, r, jahre);
-            einzahlungen = PV + PMT * 12 * jahre;
-        }
+      // --- Sparrate ---
+if(mode === "sparrate"){
+
+    const effektiverZins = Math.max(r - portfolioTER, -0.99);
+
+    let guess = 100;
+
+    for(let i = 0; i < 50; i++){
+
+        let fv = berechneFV(PV, guess, effektiverZins, jahre);
+        let ein = PV + guess * 12 * jahre;
+
+        let gewinn = Math.max(0, fv - ein);
+        let steuer = gewinn * 0.25 * steuerFaktor;
+
+        let net = fv - steuer;
+
+        guess *= ziel / net;
+    }
+
+    PMT = guess;
+
+    end = berechneFV(PV, PMT, effektiverZins, jahre);
+    einzahlungen = PV + PMT * 12 * jahre;
+}
 
         // --- Ansparzeit ---
         if(mode==="ansparzeit"){
-            dauer = berechneJahre(PV, PMT, ziel, r);
+            dauer = berechneJahre(PV, PMT, ziel, effektiverZins);
             end = ziel;
             einzahlungen = PV + PMT * 12 * dauer;
         }
 
         // --- Kosten & Steuern (NUR auf Gewinn) ---
-        const kosten = end * portfolioTER * dauer;
+       // ===== TER-Kosten realistisch berechnen =====
+
+// Endwert OHNE TER
+let endOhneTER = 0;
+
+if(mode === "endkapital"){
+    endOhneTER = berechneFV(PV, PMT, r, jahre);
+}
+
+if(mode === "sparrate"){
+    endOhneTER = berechneFV(PV, PMT, r, jahre);
+}
+
+if(mode === "ansparzeit"){
+    endOhneTER = ziel;
+}
+
+// TER-Kosten = Differenz
+const kosten = Math.max(0, endOhneTER - end);
         const gewinn = Math.max(0, end - einzahlungen);
         const steuer = gewinn * 0.25 * steuerFaktor;
-        const net = end - kosten - steuer;
+        const net = end - steuer;
 
         return { end, kosten, steuer, net, dauer, PMT };
     }
