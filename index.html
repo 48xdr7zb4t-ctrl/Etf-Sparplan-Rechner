@@ -984,8 +984,6 @@ function simulateEntnahmeReal({
   const yearsToZero = monthsToZero === null ? null : (monthsToZero / 12);
 
   // Hilfswerte aus der Simulation:
-  // Für 30 Jahre und 60 Jahre (falls nicht verfügbar, dann Endzustand)
-  // Wir simulieren dafür schnell erneut, damit es exakt ist:
   function capitalAfterYears(Y){
     const months = Math.round(Y*12);
     let kk = startKapital;
@@ -1064,8 +1062,7 @@ function selectMode(m, el){
 inputmode="decimal" placeholder="Startkapital (€)">
 <input id="pmt" type="text"
 inputmode="decimal" placeholder="Monatliche Sparrate (€)">
-<input id="jahre" type="number" inputmode="numeric"
-min="1" max="100" step="1"
+<input id="jahre" type="text" inputmode="numeric"
 placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
 <input id="zins" type="text"
 inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
@@ -1082,7 +1079,7 @@ inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach a
 </select>
 `;
     }
-
+    
     if(mode=="sparrate"){
     document.getElementById("input-title").innerText="Benötigte Sparrate berechnen";
     container.innerHTML=`
@@ -1090,8 +1087,7 @@ inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach a
 inputmode="decimal" placeholder="Startkapital (€)">
         <input id="ziel" type="text"
 inputmode="decimal" placeholder="Zielkapital (€)">
-        <input id="jahre" type="number" inputmode="numeric"
-min="1" max="100" step="1"
+        <input id="jahre" type="text" inputmode="numeric"
 placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
         <input id="zins" type="text"
 inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
@@ -1350,9 +1346,20 @@ function goToEtfs(){
     }
 
 
-    gotoStep(STEP.ETF);
-    updateRebalancingPanel();
-    document.getElementById("custom-box").style.display="none";
+ gotoStep(STEP.ETF);
+document.getElementById("custom-box").style.display = "none";
+
+// Rebalancing Panel immer passend ein-/ausblenden + Tabelle bauen
+updateRebalancingPanel();
+
+const btn = document.getElementById("calc-btn");
+if(mode === "rebalancing"){
+  btn.style.display = "block";
+  btn.innerText = "Rebalancing berechnen";
+} else {
+  btn.style.display = "block";
+  btn.innerText = "Berechnen";
+}
 
     // Hier darf sofort berechnet werden
     document.getElementById("calc-btn").style.display="block";
@@ -1408,10 +1415,11 @@ document.addEventListener("click", (e) => {
 function berechnen(){
 
 
-// ===== REBALANCING MODUS =====
+
+    // ===== REBALANCING MODUS =====
 if(mode === "rebalancing"){
 
-  // 1) Ziel-ETFs + Zielgewichte holen (aus gewählter Strategie)
+  // 1) Ziel-ETFs + Zielgewichte holen
   let selectedETFs = [];
 
   if(strategy==1){
@@ -1436,7 +1444,11 @@ if(mode === "rebalancing"){
     selectedETFs.push({...etfData.variable4[s],weight:0.2});
   }
   if(strategy==4){
-    // Customize
+    if(!customFinished){
+      alert("Bitte erst Gewichte im Customize fertig eingeben.");
+      return;
+    }
+
     const allETFs = [
       ...etfData.world5, ...etfData.world3, ...etfData.em3, ...etfData.variable4, ...customOnlyETFs
     ];
@@ -1488,8 +1500,8 @@ if(mode === "rebalancing"){
   });
 
   let needs = selectedETFs.map(e=>{
-    const needRaw = (targetValue[e.wkn] || 0) - (current[e.wkn] || 0); // kann negativ sein
-    const need = Math.max(0, needRaw); // wir dürfen nicht verkaufen
+    const needRaw = (targetValue[e.wkn] || 0) - (current[e.wkn] || 0);
+    const need = Math.max(0, needRaw);
     return { wkn:e.wkn, name:e.name, weight:e.weight, current: current[e.wkn]||0, need };
   });
 
@@ -1499,16 +1511,11 @@ if(mode === "rebalancing"){
   selectedETFs.forEach(e=> buy[e.wkn] = 0);
 
   if(sumNeed <= 0){
-    // alles bereits >= Ziel -> normal nach Gewichten investieren
     selectedETFs.forEach(e => buy[e.wkn] = pmt * e.weight);
   } else if(sumNeed >= pmt){
-
     needs.forEach(x => buy[x.wkn] = pmt * (x.need / sumNeed));
   } else {
-
     needs.forEach(x => buy[x.wkn] = x.need);
-
-    // 2) Rest nach Zielgewicht verteilen
     const rest = pmt - sumNeed;
     selectedETFs.forEach(e => {
       buy[e.wkn] += rest * e.weight;
@@ -1573,10 +1580,10 @@ if(mode === "rebalancing"){
 
   const chartWrap = document.getElementById("chart-wrap");
   if(chartWrap) chartWrap.style.display = "none";
-  _lastChartPayload = null;
 
   return;
 }
+
 
 
    const PV = parseEuro(document.getElementById("pv")?.value);
