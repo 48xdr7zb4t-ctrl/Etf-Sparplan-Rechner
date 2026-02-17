@@ -4,7 +4,16 @@
 <meta charset="UTF-8">
 <title>ETF-Rechner komplett</title>
 <style>
-body { font-family: Arial; background:#f4f4f4; margin:0; padding:0; min-height:100vh; display:flex; justify-content:center; align-items:center; }
+body{
+  font-family: Arial;
+  background:#f4f4f4;
+  margin:0;
+  padding:30px 0;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start; 
+}
 .container { max-width:1100px; width:100%; padding:40px; }
 .box { background:white; padding:25px; border-radius:12px; margin-bottom:20px; display:flex; flex-direction:column; align-items:center; }
 .box-small { max-width:420px; width:100%; margin:0 auto; }
@@ -128,15 +137,15 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 
 <!-- 1. Modus Auswahl -->
 <div class="box box-small" id="mode-box">
-    <h2>Was möchtest du berechnen?</h2>
-    <div class="strategy-grid">
-        <div class="strategy-card" onclick="selectMode('endkapital', this)">Endkapital</div>
-        <div class="strategy-card" onclick="selectMode('sparrate', this)">Benötigte Sparrate</div>
-        <div class="strategy-card" onclick="selectMode('ansparzeit', this)">Benötigte Ansparzeit</div>
-        <div class="strategy-card" onclick="selectMode('entnahme', this)">Entnahmephase</div>
-        <div class="strategy-card" onclick="selectMode('entnahme_kapital', this)">Kapital für Entnahmephase
-</div>
-    </div>
+  <h2>Was möchtest du berechnen?</h2>
+  <div class="strategy-grid">
+    <div class="strategy-card" onclick="selectMode('endkapital', this)">Endkapital</div>
+    <div class="strategy-card" onclick="selectMode('sparrate', this)">Benötigte Sparrate</div>
+    <div class="strategy-card" onclick="selectMode('ansparzeit', this)">Benötigte Ansparzeit</div>
+    <div class="strategy-card" onclick="selectMode('entnahme', this)">Entnahmephase</div>
+    <div class="strategy-card" onclick="selectMode('entnahme_kapital', this)">Kapital für Entnahmephase</div>
+    <div class="strategy-card" onclick="selectMode('rebalancing', this)">Sparplan Rebalancing</div>
+  </div>
 </div>
 
 <!-- 2. Eingabemaske -->
@@ -181,6 +190,31 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
     flex-wrap:wrap;
     justify-content:flex-start;
 ">
+</div>
+
+<div id="rebalancing-box" style="
+  display:none;
+  margin-top:15px;
+  padding:15px;
+  background:#fffdf3;
+  border-left:5px solid #ff9800;
+  border-radius:8px;
+  width:100%;
+">
+  <h3 style="margin:0 0 10px 0;">Sparplan-Rebalancing (ohne Verkäufe)</h3>
+
+  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+    <div style="flex:1; min-width:220px;">
+      <label>Monatliche Sparrate (€)</label>
+      <input id="rebalance-pmt" class="euro-input" type="text" inputmode="decimal" placeholder="z.B. 300">
+    </div>
+
+    <div style="flex:2; min-width:260px; font-size:12px; color:#666;">
+      Tipp: Gib die <b>aktuellen Depotwerte je ETF</b> ein. Dann verteilt der Rechner deine Sparrate so, dass du näher an die Ziel-Gewichte kommst.
+    </div>
+  </div>
+
+  <div id="rebalancing-table" style="margin-top:10px;"></div>
 </div>
 
 
@@ -326,7 +360,7 @@ function setVisible(step){
   document.getElementById("etf-box").style.display      = (step === STEP.ETF) ? "block" : "none";
   document.getElementById("ergebnis-box").style.display = (step === STEP.RESULT) ? "block" : "none";
 
-  // ✅ ETF-Info nur auf ETF-Seite zeigen, sonst leeren/ausblenden
+  //  ETF-Info nur auf ETF-Seite zeigen, sonst leeren/ausblenden
   const infoBox = document.getElementById("etf-info");
   if(infoBox && step !== STEP.ETF){
     infoBox.style.display = "none";
@@ -394,6 +428,94 @@ let customCount = 0;
 let customWeights = [];
 let customUserETFs = [];
 let customOnlyETFs = [];
+let customFinished = false;
+
+
+function getSelectedETFsFromUI(){
+  let picked = [];
+
+  // normale Strategien (Radios)
+  const radios = document.querySelectorAll("#etf-box input[type='radio']:checked");
+  radios.forEach(r=>{
+    const row = r.closest("tr");
+    const wkn = row?.children[1]?.innerText?.trim();
+    const name = row?.children[2]?.innerText?.trim();
+    if(wkn) picked.push({ wkn, name });
+  });
+
+  // Customize (Checkboxes)
+  const checks = document.querySelectorAll("#custom-box input[type='checkbox'][name='custom-select']:checked");
+  checks.forEach(c=>{
+    const row = c.closest("tr");
+    const wkn = row?.children[1]?.innerText?.trim();
+    const name = row?.children[2]?.innerText?.trim();
+    if(wkn) picked.push({ wkn, name });
+  });
+
+  // duplicates raus
+  const seen = new Set();
+  picked = picked.filter(x => (seen.has(x.wkn) ? false : (seen.add(x.wkn), true)));
+
+  return picked;
+}
+
+function updateRebalancingPanel(){
+  const box = document.getElementById("rebalancing-box");
+  const tbl = document.getElementById("rebalancing-table");
+  if(!box || !tbl) return;
+
+  // Nur zeigen wenn Modus rebalancing UND wir auf ETF-Seite sind
+  if(mode !== "rebalancing" || currentStep !== STEP.ETF){
+    box.style.display = "none";
+    tbl.innerHTML = "";
+    return;
+  }
+
+  //  Bei Customize (strategy 4) erst anzeigen,
+  // wenn Step 3 abgeschlossen ist (Gewichtung fertig)
+  if(strategy === 4){
+    if(!customFinished){
+      box.style.display = "none";
+      tbl.innerHTML = "";
+      return;
+    }
+  }
+
+  const picked = getSelectedETFsFromUI();
+  if(picked.length === 0){
+    box.style.display = "block";
+    tbl.innerHTML = `<p style="margin:8px 0; color:#666;">Bitte zuerst ETFs auswählen.</p>`;
+    return;
+  }
+
+  box.style.display = "block";
+
+  let html = `
+    <table>
+      <thead>
+        <tr>
+          <th>ETF</th>
+          <th>WKN</th>
+          <th>Aktueller Wert (€)</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  picked.forEach(e=>{
+    const id = `cur_${e.wkn}`;
+    html += `
+      <tr>
+        <td style="text-align:left;">${e.name || ""}</td>
+        <td>${e.wkn}</td>
+        <td><input id="${id}" class="euro-input" type="text" inputmode="decimal" placeholder="z.B. 2.500,00"></td>
+      </tr>
+    `;
+  });
+
+  html += `</tbody></table>`;
+  tbl.innerHTML = html;
+}
 
 
 // --- ETF Daten ---
@@ -753,11 +875,11 @@ function updateETFInfos(){
   );
 
   if(radios.length === 0){
-    infoBox.style.display = "none";   // ✅ wichtig
+    infoBox.style.display = "none"; 
     return;
   }
 
-  infoBox.style.display = "flex";    // ✅ nur wenn wirklich Inhalt kommt
+  infoBox.style.display = "flex";    
 
   radios.forEach(r=>{
     const row = r.closest("tr");
@@ -881,7 +1003,7 @@ function simulateEntnahmeReal({
   }
 
     const k30 = capitalAfterYears(30);
-    const k60 = capitalAfterYears(60);          // ✅ neu: damit nachhaltig funktioniert
+    const k60 = capitalAfterYears(60);          //  neu: damit nachhaltig funktioniert
     const kTarget = capitalAfterYears(yearsMax);
 
   const nachhaltig = (k60 >= k0 * 0.999);   
@@ -913,6 +1035,19 @@ function selectMode(m, el){
 
     mode = m;
 
+    if(mode === "rebalancing"){
+      document.querySelectorAll("#mode-box .strategy-card")
+        .forEach(c => c.classList.remove("active"));
+      el.classList.add("active");
+
+      // sicherheitshalber Input-Container leeren
+      const container = document.getElementById("inputs-container");
+      if(container) container.innerHTML = "";
+
+      gotoStep(STEP.STRATEGY);
+      return;
+    }
+
     document.querySelectorAll("#mode-box .strategy-card")
         .forEach(c => c.classList.remove("active"));
 
@@ -924,6 +1059,7 @@ function selectMode(m, el){
     if(mode=="endkapital"){
         document.getElementById("input-title").innerText="Endkapital berechnen";
        container.innerHTML = `
+
 <input id="pv" type="text"
 inputmode="decimal" placeholder="Startkapital (€)">
 <input id="pmt" type="text"
@@ -995,6 +1131,9 @@ inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach a
         </select>
     `;
 }
+
+
+updateETFInfos();
 if(mode=="entnahme"){
   document.getElementById("input-title").innerText="Entnahmephase berechnen";
 
@@ -1039,6 +1178,7 @@ if(mode=="entnahme"){
   // Show/Hide Zeitraum
   setTimeout(()=>initVerzehrYearsToggle(),0);
 }
+
 
 if(mode=="entnahme_kapital"){
   document.getElementById("input-title").innerText="Kapital für Entnahmephase berechnen";
@@ -1167,8 +1307,10 @@ function goToEtfs(){
     // ===== CUSTOM =====
   if(strategy == 4){
   gotoStep(STEP.ETF);
+    updateRebalancingPanel();
 
-  // ✅ Customize-Box sichtbar machen
+
+  //  Customize-Box sichtbar machen
   document.getElementById("custom-box").style.display = "block";
 
   // Optional: normale ETF-Tabellen oben leer lassen
@@ -1182,9 +1324,14 @@ function goToEtfs(){
 
   customWeights = [];
   customCount = 0;
+  customFinished = false; // 
+  document.getElementById("calc-btn").style.display = "none"; // bleibt fürs Nicht-Rebalancing egal
+  updateRebalancingPanel(); //  Rebalancing-Panel sauber ausblenden
 
   return;
 }
+
+
 
     // ===== NORMALE STRATEGIEN =====
 
@@ -1204,6 +1351,7 @@ function goToEtfs(){
 
 
     gotoStep(STEP.ETF);
+    updateRebalancingPanel();
     document.getElementById("custom-box").style.display="none";
 
     // Hier darf sofort berechnet werden
@@ -1247,6 +1395,7 @@ document.addEventListener("click", (e) => {
   }
 
   updateETFInfos();
+  updateRebalancingPanel();
 });
 
    
@@ -1254,7 +1403,182 @@ document.addEventListener("click", (e) => {
  
 
 // --- Berechnen ---
+
+
 function berechnen(){
+
+
+// ===== REBALANCING MODUS =====
+if(mode === "rebalancing"){
+
+  // 1) Ziel-ETFs + Zielgewichte holen (aus gewählter Strategie)
+  let selectedETFs = [];
+
+  if(strategy==1){
+    const i=document.querySelector('input[name="etf1"]:checked')?.value;
+    if(i===undefined){ alert("ETF auswählen"); return; }
+    selectedETFs.push({...etfData.world3[i],weight:1});
+  }
+  if(strategy==2){
+    const w=document.querySelector('input[name="etf2w"]:checked')?.value;
+    const e=document.querySelector('input[name="etf2em"]:checked')?.value;
+    if(w===undefined||e===undefined){ alert("Beide ETFs auswählen"); return; }
+    selectedETFs.push({...etfData.world5[w],weight:0.7});
+    selectedETFs.push({...etfData.em3[e],weight:0.3});
+  }
+  if(strategy==3){
+    const w=document.querySelector('input[name="etf3w"]:checked')?.value;
+    const e=document.querySelector('input[name="etf3em"]:checked')?.value;
+    const s=document.querySelector('input[name="etf3s"]:checked')?.value;
+    if(w===undefined||e===undefined||s===undefined){ alert("Alle ETFs auswählen"); return; }
+    selectedETFs.push({...etfData.world5[w],weight:0.5});
+    selectedETFs.push({...etfData.em3[e],weight:0.3});
+    selectedETFs.push({...etfData.variable4[s],weight:0.2});
+  }
+  if(strategy==4){
+    // Customize
+    const allETFs = [
+      ...etfData.world5, ...etfData.world3, ...etfData.em3, ...etfData.variable4, ...customOnlyETFs
+    ];
+    const checked = document.querySelectorAll('input[name="custom-select"]:checked');
+    if(checked.length !== customCount){ alert("Bitte ETFs auswählen"); return; }
+
+    selectedETFs = [];
+    let weightError = false;
+
+    checked.forEach((c)=>{
+      const etf = allETFs[c.value];
+      const weight = customWeights?.[etf.wkn];
+      if(weight === undefined){ weightError = true; return; }
+      selectedETFs.push({ ...etf, weight });
+    });
+
+    if(weightError){ alert("Fehler: Gewicht fehlt (Customize)."); return; }
+  }
+
+  // 2) Sparrate lesen
+  const pmt = parseEuro(document.getElementById("rebalance-pmt")?.value);
+  if(!pmt || pmt <= 0){
+    alert("Bitte monatliche Sparrate für Rebalancing eingeben.");
+    return;
+  }
+
+  // 3) aktuelle Werte lesen
+  const current = {};
+  let anyMissing = false;
+
+  selectedETFs.forEach(e=>{
+    const v = parseEuro(document.getElementById(`cur_${e.wkn}`)?.value);
+    if(!isFinite(v) || v < 0) anyMissing = true;
+    current[e.wkn] = Math.max(0, v);
+  });
+
+  if(anyMissing){
+    alert("Bitte gültige aktuelle Depotwerte je ETF eingeben.");
+    return;
+  }
+
+  // 4) Rebalancing rechnen (ohne Verkäufe)
+  const curTotal = selectedETFs.reduce((s,e)=> s + (current[e.wkn] || 0), 0);
+  const newTotal = curTotal + pmt;
+
+  const targetValue = {};
+  selectedETFs.forEach(e=>{
+    targetValue[e.wkn] = newTotal * e.weight;
+  });
+
+  let needs = selectedETFs.map(e=>{
+    const needRaw = (targetValue[e.wkn] || 0) - (current[e.wkn] || 0); // kann negativ sein
+    const need = Math.max(0, needRaw); // wir dürfen nicht verkaufen
+    return { wkn:e.wkn, name:e.name, weight:e.weight, current: current[e.wkn]||0, need };
+  });
+
+  const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
+
+  const buy = {};
+  selectedETFs.forEach(e=> buy[e.wkn] = 0);
+
+  if(sumNeed <= 0){
+    // alles bereits >= Ziel -> normal nach Gewichten investieren
+    selectedETFs.forEach(e => buy[e.wkn] = pmt * e.weight);
+  } else if(sumNeed >= pmt){
+
+    needs.forEach(x => buy[x.wkn] = pmt * (x.need / sumNeed));
+  } else {
+
+    needs.forEach(x => buy[x.wkn] = x.need);
+
+    // 2) Rest nach Zielgewicht verteilen
+    const rest = pmt - sumNeed;
+    selectedETFs.forEach(e => {
+      buy[e.wkn] += rest * e.weight;
+    });
+  }
+
+  const newVal = {};
+  const newW = {};
+  selectedETFs.forEach(e=> newVal[e.wkn] = (current[e.wkn]||0) + (buy[e.wkn]||0));
+  selectedETFs.forEach(e=> newW[e.wkn] = newTotal > 0 ? (newVal[e.wkn] / newTotal) : 0);
+
+  function euro(x){
+    return x.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
+  }
+
+  let vergleichHTML = `
+    <tr><td>Aktuelles Depot (Summe)</td><td>—</td><td>${euro(curTotal)}</td><td>—</td></tr>
+    <tr><td>Monatliche Sparrate</td><td>—</td><td>${euro(pmt)}</td><td>—</td></tr>
+    <tr><td>Neuer Depotwert (nach Sparrate)</td><td>—</td><td>${euro(newTotal)}</td><td>—</td></tr>
+    <tr><td colspan="4" style="text-align:left; padding-top:14px;"><b>Empfohlene Sparplan-Aufteilung</b></td></tr>
+  `;
+
+  selectedETFs.forEach(e=>{
+    const curW = curTotal > 0 ? (current[e.wkn]/curTotal) : 0;
+    vergleichHTML += `
+      <tr>
+        <td style="text-align:left;">
+          ${e.name}<br>
+          <small>WKN ${e.wkn} • Ziel ${(e.weight*100).toFixed(1)}%</small>
+        </td>
+        <td>—</td>
+        <td style="text-align:left;">
+          Aktuell: ${euro(current[e.wkn])} (${(curW*100).toFixed(1)}%)<br>
+          Kaufen: <b>${euro(buy[e.wkn])}</b><br>
+          Neu: ${euro(newVal[e.wkn])} (${(newW[e.wkn]*100).toFixed(1)}%)
+        </td>
+        <td>—</td>
+      </tr>
+    `;
+  });
+
+  document.getElementById("vergleich").innerHTML = vergleichHTML;
+
+  document.getElementById("info-inputs").innerHTML = `
+    <p><strong>Modus:</strong> Rebalancing</p>
+    <p><strong>Sparrate:</strong> ${euro(pmt)} / Monat</p>
+    <p><strong>Aktuelles Depot:</strong> ${euro(curTotal)}</p>
+  `;
+
+  const etfBox = document.getElementById("info-etfs");
+  etfBox.innerHTML = "";
+  selectedETFs.forEach(e=>{
+    etfBox.innerHTML += `
+      <p>
+        <strong>${(e.weight*100).toFixed(0)}%</strong> ${e.name}<br>
+        <small>WKN: ${e.wkn}</small>
+      </p>
+    `;
+  });
+
+  gotoStep(STEP.RESULT);
+
+  const chartWrap = document.getElementById("chart-wrap");
+  if(chartWrap) chartWrap.style.display = "none";
+  _lastChartPayload = null;
+
+  return;
+}
+
+
    const PV = parseEuro(document.getElementById("pv")?.value);
 const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
 const ziel = parseEuro(document.getElementById("ziel")?.value);
@@ -1356,6 +1680,9 @@ checked.forEach((c)=>{
   selectedETFs.push({ ...etf, weight });
 });
 
+
+
+
 if (weightError) {
   alert("Fehler: Gewicht fehlt (Customize). Bitte Gewichte erneut eingeben.");
   return;
@@ -1414,7 +1741,7 @@ if(mode === "sparrate"){
   let low = 0;
   let high = Math.max(1, ziel);   // Startwert
 
-  // ✅ high dynamisch vergrößern, bis Ziel erreichbar ist
+  //  high dynamisch vergrößern, bis Ziel erreichbar ist
   for(let guard = 0; guard < 60; guard++){
     const fv = berechneFV(PV, high, effektiverZins, jahre);
     const ein = PV + high * 12 * jahre;
@@ -1428,7 +1755,7 @@ if(mode === "sparrate"){
     high *= 2;   // verdoppeln bis es reicht
   }
 
-  // ✅ Bisection
+  //  Bisection
   for(let i = 0; i < 60; i++){
     const mid = (low + high) / 2;
 
@@ -1457,7 +1784,7 @@ if(mode === "ansparzeit"){
   let low = 0;
   let high = 1;
 
-  // ✅ high dynamisch vergrößern bis Ziel erreichbar ist
+  //  high dynamisch vergrößern bis Ziel erreichbar ist
   for(let guard = 0; guard < 60; guard++){
     const fv = berechneFV(PV, PMT, effektiverZins, high);
     const ein = PV + PMT * 12 * high;
@@ -1471,7 +1798,7 @@ if(mode === "ansparzeit"){
     high *= 2;  // 1,2,4,8,16...
   }
 
-  // ✅ Bisection
+  //  Bisection
   for(let i = 0; i < 60; i++){
     const mid = (low + high) / 2;
 
@@ -1536,10 +1863,10 @@ if(mode === "entnahme"){
   // Rendite nach Portfolio-TER (nominal)
   const nominalNetto = Math.max(r - portfolioTER, -0.99);
 
-  // ✅ Eingabe ist NETTO-Auszahlung
+  //  Eingabe ist NETTO-Auszahlung
   const desiredNet = entnahme || 0;
 
-  // ✅ Netto -> Depot-Brutto (inkl. Teilfreistellung)
+  //  Netto -> Depot-Brutto (inkl. Teilfreistellung)
   const netF = withdrawalNetFactor(kirchensteuer, steuerFaktor);
   const withdrawFromDepot = (netF > 0) ? (desiredNet / netF) : Infinity;
 
@@ -1555,7 +1882,7 @@ if(mode === "entnahme"){
     verzehrArt: verzehr
   });
 
-    // ✅ Für die Anzeige immer "Kapital nach 30 Jahren (real)"
+    //  Für die Anzeige immer "Kapital nach 30 Jahren (real)"
   const horizon = 30;
   const endRealH = sim.k30;
 
@@ -1707,7 +2034,7 @@ const chartWrap = document.getElementById("chart-wrap");
 if(chartWrap) chartWrap.style.display = "none";
 
 if(mode === "endkapital"){
-  // Durchschnitts-Szenario: ra
+  // Durchschnitts-Szenario: 
   const effektivZinsAvg = Math.max(ra - portfolioTER, -0.99);
 
   // Jahresreihe 1..jahre (Chart: immer korrekt 1..100)
@@ -2166,7 +2493,7 @@ function customStep1(){
   return;
 }
 
-// ✅ Max nach verfügbaren ETFs begrenzen (inkl. customOnlyETFs)
+//  Max nach verfügbaren ETFs begrenzen (inkl. customOnlyETFs)
 const allETFs = [
   ...etfData.world5,
   ...etfData.world3,
@@ -2250,7 +2577,6 @@ function finishCustom(){
     sum += val;
   }
 
-  // toleranter als Math.round(sum) (sonst nervig bei Kommawerten)
   if (Math.abs(sum - 100) > 0.01) {
     alert("Summe muss 100% sein");
     return;
@@ -2258,10 +2584,32 @@ function finishCustom(){
 
   // global speichern, damit berechnen() es findet
   customWeights = weightMap;
+  customFinished = true; //  neu: Gewichtung ist fertig
 
+  // Step 3 ausblenden
   document.getElementById("custom-step3").style.display = "none";
-  document.getElementById("calc-btn").style.display = "block";
+
+  //  Sonderfall: Rebalancing -> erst Rebalancing Eingaben, dann berechnen
+  if(mode === "rebalancing"){
+    // Rebalancing-Panel einblenden/neu aufbauen
+    updateRebalancingPanel();
+
+    // Button zeigen, damit User nach Eingaben berechnen kann
+    const btn = document.getElementById("calc-btn");
+    btn.style.display = "block";
+    btn.innerText = "Rebalancing berechnen";
+
+    // optional: scroll zum Rebalancing Bereich
+    document.getElementById("rebalancing-box")?.scrollIntoView({behavior:"smooth", block:"start"});
+
+    return;
+  }
+
+  //  Alle anderen Modi: direkt berechnen (keine Extra-Seite/kein Extra-Klick)
+  document.getElementById("calc-btn").style.display = "none";
+  berechnen();
 }
+
 // ===== EURO-EINGABE FORMATIERUNG =====
 
 function parseNumberDE(str){
@@ -2319,7 +2667,7 @@ function formatEuroInput(el){
 // ===== EURO-EINGABE FORMATIERUNG (LIVE mit Tausenderpunkten) =====
 
 // Welche Felder sollen live formatiert werden?
-const EURO_FIELDS = "#pv, #pmt, #ziel, #entnahme";
+const EURO_FIELDS = "#pv, #pmt, #ziel, #entnahme, .euro-input";
 const PERCENT_FIELDS = "#zins, #inflation, #new-ter, #new-tf";
 const YEARS_FIELDS = "#verzehr_jahre";
 
@@ -2391,7 +2739,12 @@ document.addEventListener("input", (e)=>{
 // Optional: beim Fokusverlust nochmal sauber lassen (eigentlich nicht nötig, aber okay)
 document.addEventListener("blur", (e)=>{
   if(!e.target.matches(EURO_FIELDS)) return;
-  formatNumberDELive(e.target, 2);
+
+  // erzwinge 2 Nachkommastellen
+  const n = parseEuro(e.target.value);
+  if(!isFinite(n)) return;
+
+  e.target.value = n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }, true);
 
 function buildCustomTable(){
