@@ -306,7 +306,7 @@ inputmode="decimal" step="1" placeholder="Teilfreistellung %">
       <!-- Chart direkt unter der Tabelle -->
       <div id="chart-wrap" style="display:none;">
         <div id="chartTooltip" class="chart-tooltip"></div>
-        <h3 style="margin:0 0 10px 0;">Vermögensentwicklung (Durchschnitt) – Netto bei Verkauf am Jahresende</h3>
+        <h3 style="margin:0 0 10px 0;">Vermögensentwicklung (Durchschnitt) - buy and hold</h3>
         <canvas id="avgChart"></canvas>
         <p style="margin-top:8px; font-size:12px; color:#666; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
   <span>X-Achse: Jahre • Y-Achse: Nettovermögen</span>
@@ -425,7 +425,7 @@ history.replaceState({ step: STEP.MODE }, "", "#mode");
 
 let strategy = null;
 let customCount = 0;
-let customWeights = [];
+let customWeights = {}; // Map: { [wkn]: weight }
 let customUserETFs = [];
 let customOnlyETFs = [];
 let customFinished = false;
@@ -457,6 +457,7 @@ function getSelectedETFsFromUI(){
   picked = picked.filter(x => (seen.has(x.wkn) ? false : (seen.add(x.wkn), true)));
 
   return picked;
+
 }
 
 function updateRebalancingPanel(){
@@ -502,16 +503,16 @@ function updateRebalancingPanel(){
       <tbody>
   `;
 
-  picked.forEach(e=>{
-    const id = `cur_${e.wkn}`;
-    html += `
-      <tr>
-        <td style="text-align:left;">${e.name || ""}</td>
-        <td>${e.wkn}</td>
-        <td><input id="${id}" class="euro-input" type="text" inputmode="decimal" placeholder="z.B. 2.500,00"></td>
-      </tr>
-    `;
-  });
+picked.forEach((e, idx)=>{
+  const id = `cur_${idx}`; // <- garantiert unique
+  html += `
+    <tr>
+      <td style="text-align:left;">${e.name || ""}</td>
+      <td>${e.wkn || "—"}</td>
+      <td><input id="${id}" class="euro-input" type="text" inputmode="decimal" placeholder="z.B. 2.500,00"></td>
+    </tr>
+  `;
+});
 
   html += `</tbody></table>`;
   tbl.innerHTML = html;
@@ -1234,10 +1235,8 @@ function initVerzehrYearsToggle(){
     wrap.style.display = mit ? "block" : "none";
     if(!mit && years) years.value = ""; // optional: Feld leeren wenn "ohne"
   }
-
-  sel.removeEventListener("change", sync);
-  sel.addEventListener("change", sync);
-  sync();
+   sel.onchange = sync; // überschreibt alten Handler
+   sync();
 }
 
 // --- Strategie Auswahl ---
@@ -1318,7 +1317,7 @@ function goToEtfs(){
   document.getElementById("custom-step3").style.display = "none";
   document.getElementById("calc-btn").style.display = "none";
 
-  customWeights = [];
+  customWeights = {};
   customCount = 0;
   customFinished = false; // 
   document.getElementById("calc-btn").style.display = "none"; // bleibt fürs Nicht-Rebalancing egal
@@ -1460,13 +1459,20 @@ if(mode === "rebalancing"){
 
     checked.forEach((c)=>{
       const etf = allETFs[c.value];
-      const weight = customWeights?.[etf.wkn];
-      if(weight === undefined){ weightError = true; return; }
-      selectedETFs.push({ ...etf, weight });
+ const weight = customWeights[c.value];
+
+if(!Number.isFinite(weight) || weight <= 0){
+  weightError = true;
+  return;
+}
+
+selectedETFs.push({ ...etf, weight });
     });
 
     if(weightError){ alert("Fehler: Gewicht fehlt (Customize)."); return; }
   }
+
+  selectedETFs = selectedETFs.map((e, idx) => ({ ...e, _rbKey: String(idx) }));
 
   // 2) Sparrate lesen
   const pmt = parseEuro(document.getElementById("rebalance-pmt")?.value);
@@ -1476,14 +1482,14 @@ if(mode === "rebalancing"){
   }
 
   // 3) aktuelle Werte lesen
-  const current = {};
-  let anyMissing = false;
+const current = {};
+let anyMissing = false;
 
-  selectedETFs.forEach(e=>{
-    const v = parseEuro(document.getElementById(`cur_${e.wkn}`)?.value);
-    if(!isFinite(v) || v < 0) anyMissing = true;
-    current[e.wkn] = Math.max(0, v);
-  });
+selectedETFs.forEach(e=>{
+  const v = parseEuro(document.getElementById(`cur_${e._rbKey}`)?.value);
+  if(!isFinite(v) || v < 0) anyMissing = true;
+  current[e._rbKey] = Math.max(0, v);
+});
 
   if(anyMissing){
     alert("Bitte gültige aktuelle Depotwerte je ETF eingeben.");
@@ -1491,41 +1497,38 @@ if(mode === "rebalancing"){
   }
 
   // 4) Rebalancing rechnen (ohne Verkäufe)
-  const curTotal = selectedETFs.reduce((s,e)=> s + (current[e.wkn] || 0), 0);
+  const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0);
   const newTotal = curTotal + pmt;
 
   const targetValue = {};
   selectedETFs.forEach(e=>{
-    targetValue[e.wkn] = newTotal * e.weight;
+    targetValue[e._rbKey] = newTotal * e.weight;
   });
 
-  let needs = selectedETFs.map(e=>{
-    const needRaw = (targetValue[e.wkn] || 0) - (current[e.wkn] || 0);
-    const need = Math.max(0, needRaw);
-    return { wkn:e.wkn, name:e.name, weight:e.weight, current: current[e.wkn]||0, need };
-  });
+
+return { _rbKey: e._rbKey, wkn:e.wkn, name:e.name, weight:e.weight, current: current[e._rbKey]||0, need };
 
   const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
 
   const buy = {};
-  selectedETFs.forEach(e=> buy[e.wkn] = 0);
+  selectedETFs.forEach(e=> buy[e._rbKey] = 0);
 
   if(sumNeed <= 0){
-    selectedETFs.forEach(e => buy[e.wkn] = pmt * e.weight);
+    selectedETFs.forEach(e => buy[e._rbKey] = pmt * e.weight);
   } else if(sumNeed >= pmt){
-    needs.forEach(x => buy[x.wkn] = pmt * (x.need / sumNeed));
+    needs.forEach(x => buy[x._rbKey] = pmt * (x.need / sumNeed));
   } else {
     needs.forEach(x => buy[x.wkn] = x.need);
     const rest = pmt - sumNeed;
     selectedETFs.forEach(e => {
-      buy[e.wkn] += rest * e.weight;
+      buy[e._rbKey] += rest * e.weight;
     });
   }
 
   const newVal = {};
   const newW = {};
-  selectedETFs.forEach(e=> newVal[e.wkn] = (current[e.wkn]||0) + (buy[e.wkn]||0));
-  selectedETFs.forEach(e=> newW[e.wkn] = newTotal > 0 ? (newVal[e.wkn] / newTotal) : 0);
+  selectedETFs.forEach(e=> newVal[e._rbKey]= (current[e._rbKey]||0) + (buy[e._rbKey]||0));
+  selectedETFs.forEach(e=> newW[e._rbKey] = newTotal > 0 ? (newVal[e._rbKey]/ newTotal) : 0);
 
   function euro(x){
     return x.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
@@ -1539,7 +1542,7 @@ if(mode === "rebalancing"){
   `;
 
   selectedETFs.forEach(e=>{
-    const curW = curTotal > 0 ? (current[e.wkn]/curTotal) : 0;
+    const curW = curTotal > 0 ? (current[e._rbKey]/curTotal) : 0;
     vergleichHTML += `
       <tr>
         <td style="text-align:left;">
@@ -1548,9 +1551,9 @@ if(mode === "rebalancing"){
         </td>
         <td>—</td>
         <td style="text-align:left;">
-          Aktuell: ${euro(current[e.wkn])} (${(curW*100).toFixed(1)}%)<br>
-          Kaufen: <b>${euro(buy[e.wkn])}</b><br>
-          Neu: ${euro(newVal[e.wkn])} (${(newW[e.wkn]*100).toFixed(1)}%)
+          Aktuell: ${euro(current[e._rbKey])} (${(curW*100).toFixed(1)}%)<br>
+          Kaufen: <b>${euro(buy[e._rbKey])}</b><br>
+          Neu: ${euro(newVal[e._rbKey])} (${(newW[e._rbKey]*100).toFixed(1)}%)
         </td>
         <td>—</td>
       </tr>
@@ -1677,12 +1680,8 @@ let weightError = false;
 
 checked.forEach((c)=>{
   const etf = allETFs[c.value];
-  const weight = customWeights?.[etf.wkn];
-
-  if (weight === undefined) {
-    weightError = true;
-    return;
-  }
+const weight = customWeights[c.value];
+if(!Number.isFinite(weight) || weight <= 0){ weightError = true; return; }
 
   selectedETFs.push({ ...etf, weight });
 });
@@ -1842,8 +1841,8 @@ if(mode === "ansparzeit"){
     endOhneTER = berechneFV(PV, PMT, r, dauer);
 }
 
-// TER-Kosten = Differenz
-const kosten = Math.max(0, endOhneTER - end);
+// TER-Effekt = Opportunitätsverlust (Rendite-/Endwert-Differenz, keine "Gebühr")
+const terOpportunitaetsverlust = Math.max(0, endOhneTER - end);
 
 // Gewinn berechnen
 const gewinnBrutto = Math.max(0, end - einzahlungen);
@@ -2027,7 +2026,7 @@ if(mode === "entnahme_kapital"){
   };
 }
 
-        return { end, kosten, steuer, net, dauer, PMT };
+       return { end, terOpportunitaetsverlust, steuer, net, dauer, PMT, endOhneTER };
     }
 
     const w = calc(rw);
@@ -2050,18 +2049,21 @@ if(mode === "endkapital"){
   if(!Number.isFinite(yearsInt)) yearsInt = 1;
   yearsInt = Math.min(100, Math.max(1, yearsInt));
 
-  const netSeries = buildYearSeriesNetto(
-    PV,
-    PMT_INPUT,
-    effektivZinsAvg,
-    yearsInt,
-    steuerFaktor,
-    kirchensteuer
-  );
+const netSeries = buildYearSeriesNetto(
+  PV,
+  PMT_INPUT,
+  effektivZinsAvg,
+  yearsInt,
+  steuerFaktor,
+  kirchensteuer
+);
+
+// ✅ Brutto (ohne Steuerabzug) – für "echten Zins" im Tooltip
+const grossSeries = buildYearSeriesEndkapital(PV, PMT_INPUT, effektivZinsAvg, yearsInt);
 
 const investedSeries = buildYearSeriesInvested(PV, PMT_INPUT, yearsInt);
 
-// Zinszuwachs = Netto - Investiert (kann in schlechten Phasen negativ sein)
+// Zinszuwachs (NETTO gesamt) = Netto - Investiert
 const interestSeries = netSeries.map((v,i)=> v - investedSeries[i]);
 
 const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
@@ -2069,7 +2071,7 @@ const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
 if(chartWrap){
   chartWrap.style.display = "block";
   const canvas = document.getElementById("avgChart");
-  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries, PV);
+  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries, PV, grossSeries);
 }
 
 
@@ -2218,10 +2220,10 @@ else {
         <td>${euro(a.end)}</td>
         <td>${euro(b.end)}</td>
     </tr>
-   <tr><td>Kosten durch TER (Opportunitätskosten)</td>
-    <td>${euro(w.kosten)}</td>
-    <td>${euro(a.kosten)}</td>
-    <td>${euro(b.kosten)}</td>
+<tr><td>TER (Verwaltungskosten)</td>
+    <td>${euro(w.terOpportunitaetsverlust)}</td>
+    <td>${euro(a.terOpportunitaetsverlust)}</td>
+    <td>${euro(b.terOpportunitaetsverlust)}</td>
 </tr>
     <tr><td>Steuern (nur Gewinn)</td>
         <td>${euro(w.steuer)}</td>
@@ -2238,6 +2240,18 @@ else {
 
 document.getElementById("vergleich").innerHTML = vergleichHTML;
 
+
+// Hinweis: TER "Kosten" sind hier Opportunitätskosten (Rendite-Differenz), keine abgebuchte Gebühr.
+const vergleichEl = document.getElementById("vergleich");
+const hintId = "ter-hint-row";
+const existingHint = document.getElementById(hintId);
+if(existingHint) existingHint.remove();
+
+if(mode === "endkapital" || mode === "sparrate" || mode === "ansparzeit"){
+  const tr = document.createElement("tr");
+  tr.id = hintId;
+  vergleichEl.appendChild(tr);
+}
 
 
 
@@ -2363,9 +2377,11 @@ let totalStocks = selectedETFs.reduce((sum, e)=>{
 // Anzeige unter ALLEN ETFs
 etfBox.innerHTML += `
     <hr style="margin:15px 0;">
-    <p><strong>Portfolio-TER (gewichtet):</strong> ${portfolioTERPercent}%</p>
+    <p style="font-size:12px; color:#666; margin-top:6px;">
+  TER wirkt als laufender Renditeabzug im Fonds (Performance), nicht als separate Rechnung.
+</p>
     <p><strong>Summe Einzel-TER:</strong> ${sumTERPercent}%</p>
-
+    <p><strong>Portfolio-TER (gewichtet):</strong> ${portfolioTERPercent}%</p>
     <p><strong>Zinssätze (angenommen):</strong><br>
     Schlecht: ${ (rw*100).toFixed(2) }%<br>
     Durchschnitt: ${ (ra*100).toFixed(2) }%<br>
@@ -2468,22 +2484,19 @@ if(restBox){
     }
 
     // Toggle
-    document
-      .getElementById("toggleRest")
-      .addEventListener("click", ()=>{
+ // Toggle (KEIN Listener-Stacking)
+const toggleEl = document.getElementById("toggleRest");
+if (toggleEl) {
+  toggleEl.onclick = () => {
+    const visible = restBox.style.display === "block";
+    restBox.style.display = visible ? "none" : "block";
 
-        const visible =
-            restBox.style.display === "block";
-
-        restBox.style.display =
-            visible ? "none" : "block";
-
-        document.getElementById("toggleRest")
-            .innerHTML = `
-            Sonstige: <strong>${aggregatedSonstige.toFixed(2)}%</strong>
-            ${visible ? "▼" : "▲"}
-        `;
-    });
+    toggleEl.innerHTML = `
+      Sonstige: <strong>${aggregatedSonstige.toFixed(2)}%</strong>
+      ${visible ? "▼" : "▲"}
+     `;
+   };
+  }
 }
 
 
@@ -2553,13 +2566,14 @@ function customStep2(){
 const tds = row.querySelectorAll("td");
 const wkn = (tds[1]?.innerText || "").trim();
 const name = (tds[2]?.innerText || "").trim();
+const key = c.value;
 
-    container.innerHTML += `
-        <label>${name} Gewicht (%)</label>
-        <input type="text"
-               inputmode="decimal"
-               data-wkn="${wkn}">
-    `;
+container.innerHTML += `
+  <label>${name} Gewicht (%)</label>
+  <input type="text"
+         inputmode="decimal"
+         data-key="${key}">
+`;
 });
 }
 
@@ -2568,11 +2582,11 @@ const name = (tds[2]?.innerText || "").trim();
 function finishCustom(){
   const inputs = document.querySelectorAll("#weight-inputs input");
 
-  let weightMap = {};
+  let weightMap = Object.create(null);
   let sum = 0;
 
   for (const input of inputs) {
-    const wkn = input.dataset.wkn;
+    const key = input.dataset.key;
     const val = parseNumberDE(input.value);
 
     if (!val || val <= 0) {
@@ -2580,7 +2594,7 @@ function finishCustom(){
       return;
     }
 
-    weightMap[wkn] = val / 100;
+    weightMap[key] = val / 100;
     sum += val;
   }
 
@@ -2863,7 +2877,7 @@ function formatEUR(x){
   return x.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
 }
 
-function renderStackedBarChart(canvas, labels, invested, interest, net, basePV){
+function renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross){
   if(!canvas) return;
 
   const ctx = canvas.getContext("2d");
@@ -2986,11 +3000,17 @@ function renderStackedBarChart(canvas, labels, invested, interest, net, basePV){
     ctx.fillRect(x, yTopBlue, barW, blueH);
   }
 
-    const yTop = Math.min(yInvTop, yTotal);
-    const yBottom = Math.max(yInvTop, yTotal);
-    const barH = Math.max(1, yBottom - yTop);   
 
-  bars.push({ i, x, y: yTop, w: barW, h: barH });
+// ✅ Hitbox = ganzer Slot (viel leichter zu treffen)
+const hitPadX = Math.max(6, Math.floor(slot * 0.20)); // extra Luft links/rechts im Slot
+const hitX = startX + i * slot + hitPadX;
+const hitW = Math.max(10, slot - hitPadX * 2);
+
+const yTopHit = Math.min(yInvTop, yTotal);
+const yBottomHit = (h - padB);                 // Baseline
+const barHHit = Math.max(12, yBottomHit - yTopHit); // min. Höhe, damit kleine Balken easy sind
+
+bars.push({ i, x: hitX, y: yTopHit, w: hitW, h: barHHit });
 }
 
 
@@ -3020,10 +3040,10 @@ for(let j=0; j<n; j++){
 
 
 
-
+ // Balkendiagramm
 
   // in global payload speichern (für Resize + Hover)
-  _lastChartPayload = { labels, invested, interest, net, bars, basePV };
+  _lastChartPayload = { labels, invested, interest, net, gross, bars, basePV };
 
   // Tooltip-Helfer
   function hideTip(){
@@ -3042,13 +3062,22 @@ function showTipByBar(idx){
   const intCum = interest[idx] || 0;
   const totalNet = net[idx] ?? (invCum + intCum);
 
-  const prevNet = idx > 0 ? (net[idx - 1] ?? 0) : 0;
+  const prevNet = (idx > 0) ? (net[idx - 1] ?? (basePV || 0)) : (basePV || 0);
   const prevInv = idx > 0 ? (invested[idx - 1] ?? 0) : (basePV || 0);
-
   const netDeltaYear = totalNet - prevNet;
   const invDeltaYear = invCum - prevInv;
 
-  const intYear = (idx === 0) ? intCum : (netDeltaYear - invDeltaYear);
+  // ✅ Netto-"Zins im Jahr" (enthält Steuer-Effekt, weil Netto-Deltas)
+  const intYearNet = (idx === 0) ? intCum : (netDeltaYear - invDeltaYear);
+
+  // ✅ Echter Zins im Jahr (BRUTTO, vor Steuer) aus Brutto-Serie
+  const grossTot = gross?.[idx] ?? (invCum + intCum); // Fallback
+  const prevGross = (idx > 0) ? (gross?.[idx-1] ?? basePV) : (basePV || 0);
+  const grossDeltaYear = grossTot - prevGross;
+  const intYearGross = grossDeltaYear - invDeltaYear;
+
+  // Steuer-/Netto-Effekt im Jahr (meist negativ)
+  const taxEffectYear = intYearNet - intYearGross;
 
   tooltip.innerHTML = `
     <div style="font-weight:700; margin-bottom:6px;">Jahr ${year}</div>
@@ -3059,13 +3088,18 @@ function showTipByBar(idx){
     </div>
 
     <div class="row">
-      <span><span class="dot" style="background:#2196F3;"></span>Zinszuwachs (gesamt)</span>
+      <span><span class="dot" style="background:#2196F3;"></span>Zinszuwachs (gesamt, netto)</span>
       <span><b>${formatEUR(intCum)}</b></span>
     </div>
 
     <div class="row">
-      <span><span class="dot" style="background:#2196F3; opacity:.55;"></span>Zinszuwachs (im Jahr)</span>
-      <span><b>${formatEUR(intYear)}</b></span>
+      <span><span class="dot" style="background:#2196F3; opacity:.55;"></span>Zinszuwachs (im Jahr, brutto)</span>
+      <span><b>${formatEUR(intYearGross)}</b></span>
+    </div>
+
+    <div class="row">
+      <span><span class="dot" style="background:#999; opacity:.55;"></span>Steuer-/Netto-Effekt (im Jahr)</span>
+      <span><b>${formatEUR(taxEffectYear)}</b></span>
     </div>
 
     <div class="row" style="margin-top:6px; padding-top:6px; border-top:1px solid #eee;">
@@ -3126,9 +3160,9 @@ function showTipByBar(idx){
 let _lastChartPayload = null;
 window.addEventListener("resize", ()=>{
   if(!_lastChartPayload) return;
-  const {labels, invested, interest, net, basePV} = _lastChartPayload;
-  const canvas = document.getElementById("avgChart");
-  renderStackedBarChart(canvas, labels, invested, interest, net, basePV);
+const {labels, invested, interest, net, gross, basePV} = _lastChartPayload;
+const canvas = document.getElementById("avgChart");
+renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross);
 });
 
 // ===== ENTER = immer "Weiter" =====
