@@ -21,11 +21,9 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 .etf-row { cursor:pointer; transition: background 0.2s, border-left 0.2s; }
 .etf-row:hover { background:#f5f5f5; }
 .etf-row.selected { background:#e8f5e9; border-left:6px solid #4CAF50; }
-.etf-row input[type="radio"] { transform: scale(1.2); }
-
-.result-container { display:flex; gap:30px; flex-wrap:wrap; }
-.result-box { flex:2; }
-.info-box { flex:1; background:#fafafa; padding:20px; border-radius:10px; }
+.etf-row input[type="radio"] { transform: scale(1.2); }      
+.etf-row td { vertical-align: middle; }
+.etf-row input { cursor:pointer; }
 
 #etf-box { align-items:flex-start; }
 #etf-box h2 { align-self:center; margin-bottom:20px; }
@@ -55,49 +53,51 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
   margin-top:10px;
   }
 
-/* Chart soll exakt die Breite der Tabelle haben */
-#chart-wrap { width: 100%; }
-#avgChart { width: 100%; height: 320px; display:block; }  /* Höhe kannst du anpassen */
 
-
+/* ===== Ergebnis Layout (einheitlich) ===== */
 .result-container{
   display:flex;
   gap:30px;
   align-items:flex-start;
-  justify-content:center;   
-  flex-wrap:nowrap;         
+  justify-content:center;
+  flex-wrap:nowrap;
 }
 
-/* Links: NICHT 100% Seitenbreite */
+/* Links: Tabelle + Chart */
 .result-box{
-  flex: 0 0 640px;          
+  flex: 0 0 640px;
   max-width: 640px;
 }
 
-/* Rechts: Info-Box */
+/* Rechts: Info */
 .info-box{
   flex: 0 0 320px;
   max-width: 320px;
+  background:#fafafa;
+  padding:20px;
+  border-radius:10px;
 }
 
 /* Mobile: untereinander */
 @media (max-width: 1050px){
-  .result-container{
-    flex-wrap:wrap;
-  }
+  .result-container{ flex-wrap:wrap; }
   .result-box, .info-box{
     flex: 1 1 100%;
     max-width: 100%;
   }
 }
 
-/* Chart exakt so breit wie result-box */
+/* ===== Chart Layout (nur einmal) ===== */
 #chart-wrap{
   width:100%;
   margin-top:20px;
-  position:relative;   
+  position:relative;
 }
-#avgChart{ width:100%; height:320px; display:block; }
+#avgChart{
+  width:100%;
+  height:320px;
+  display:block;
+}
 
 /* Tooltip für Canvas-Chart */
 .chart-tooltip{
@@ -272,7 +272,7 @@ inputmode="decimal" step="1" placeholder="Teilfreistellung %">
       <!-- Chart direkt unter der Tabelle -->
       <div id="chart-wrap" style="display:none;">
         <div id="chartTooltip" class="chart-tooltip"></div>
-        <h3 style="margin:0 0 10px 0;">Vermögensentwicklung (Durchschnitt)</h3>
+        <h3 style="margin:0 0 10px 0;">Vermögensentwicklung (Durchschnitt) – Netto bei Verkauf am Jahresende</h3>
         <canvas id="avgChart"></canvas>
         <p style="margin-top:8px; font-size:12px; color:#666; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
   <span>X-Achse: Jahre • Y-Achse: Nettovermögen</span>
@@ -325,6 +325,13 @@ function setVisible(step){
   document.getElementById("strategy-box").style.display = (step === STEP.STRATEGY) ? "block" : "none";
   document.getElementById("etf-box").style.display      = (step === STEP.ETF) ? "block" : "none";
   document.getElementById("ergebnis-box").style.display = (step === STEP.RESULT) ? "block" : "none";
+
+  // ✅ ETF-Info nur auf ETF-Seite zeigen, sonst leeren/ausblenden
+  const infoBox = document.getElementById("etf-info");
+  if(infoBox && step !== STEP.ETF){
+    infoBox.style.display = "none";
+    infoBox.innerHTML = "";
+  }
 }
 
 // Push Step in Stack + Browser History (damit Browser-Zurück geht)
@@ -547,7 +554,7 @@ const etfInfos = {
 • Fondsgröße: 3,9 Mrd €<br>
 • Top-10 Gewichtung: 31,61%<br><br>
 <b>Top 5 Länder:</b><br>
-🇹🇼Taiwan 28,03%%<br>
+🇹🇼Taiwan 28,03%<br>
 🇮🇳Indien 18,84%<br>
 🇰🇷Südkorea 18,27%<br>
 🇧🇷Brasilien 5,37%<br>
@@ -735,40 +742,46 @@ const etfCountries = {
 
 // ====== FUNKTION: Auswahl anzeigen ======
 function updateETFInfos(){
-    const infoBox = document.getElementById("etf-info");
-    infoBox.innerHTML = "";
-    infoBox.style.display = "flex";
+  const infoBox = document.getElementById("etf-info");
+  if(!infoBox) return;
 
-    // alle ausgewählten ETFs
+  infoBox.innerHTML = "";
 
-    const radios =
-     document.querySelectorAll(
-     "#etf-box input[type='radio']:checked, " +
-     "#custom-box input[type='checkbox']:checked"
-);
-    if(radios.length === 0) return;
+  const radios = document.querySelectorAll(
+    "#etf-box input[type='radio']:checked, " +
+    "#custom-box input[type='checkbox']:checked"
+  );
 
-    radios.forEach(r=>{
-        const row = r.closest("tr");
-        const wkn = row.children[1].innerText;
-        const nameETF = row.children[2].innerText;
+  if(radios.length === 0){
+    infoBox.style.display = "none";   // ✅ wichtig
+    return;
+  }
 
-        const div = document.createElement("div");
-        div.style.background="#f6fff6";
-        div.style.padding="10px";
-        div.style.border="1px solid #4CAF50";
-        div.style.borderRadius="8px";
-        div.style.flex="1";
-        div.style.minWidth="250px";
+  infoBox.style.display = "flex";    // ✅ nur wenn wirklich Inhalt kommt
 
-        if(etfInfos[wkn]){
-            div.innerHTML = `<strong>${nameETF}</strong><br>${etfInfos[wkn]}`;
-        } else {
-            div.innerHTML = `<strong>${nameETF}</strong><br>Keine Zusatzinformationen vorhanden.`;
-        }
+  radios.forEach(r=>{
+    const row = r.closest("tr");
+    if(!row) return;
 
-        infoBox.appendChild(div);
-    });
+    const wkn = row.children[1]?.innerText?.trim();
+    const nameETF = row.children[2]?.innerText?.trim();
+
+    const div = document.createElement("div");
+    div.style.background="#f6fff6";
+    div.style.padding="10px";
+    div.style.border="1px solid #4CAF50";
+    div.style.borderRadius="8px";
+    div.style.flex="1";
+    div.style.minWidth="250px";
+
+    if(wkn && etfInfos[wkn]){
+      div.innerHTML = `<strong>${nameETF || ""}</strong><br>${etfInfos[wkn]}`;
+    } else {
+      div.innerHTML = `<strong>${nameETF || ""}</strong><br>Keine Zusatzinformationen vorhanden.`;
+    }
+
+    infoBox.appendChild(div);
+  });
 }
 
 
@@ -867,17 +880,14 @@ function simulateEntnahmeReal({
     return kk;
   }
 
-  const k30 = capitalAfterYears(30);
-  const k60 = capitalAfterYears(60);
-  const kTarget = capitalAfterYears(yearsMax);
+    const k30 = capitalAfterYears(30);
+    const k60 = capitalAfterYears(60);          // ✅ neu: damit nachhaltig funktioniert
+    const kTarget = capitalAfterYears(yearsMax);
 
-  // Nachhaltigkeit „ohne Kapitalverzehr“:
-  // Idee: Kapital soll langfristig nicht schrumpfen (real).
-  // Wir nehmen als pragmatisches Kriterium: nach 60 Jahren >= Startkapital.
-  const nachhaltig = (k60 >= k0 * 0.999); // kleine Toleranz
+  const nachhaltig = (k60 >= k0 * 0.999);   
+
 
   // Benötigtes Kapital für ewige Rente (real) nach Formel:
-  // annualWithdraw <= realRate * Kapital + annualSparrate
   const annualWithdraw = (freq === "monatlich") ? entnahmeBetrag * 12 : entnahmeBetrag;
   const annualSave = (monatSparrate || 0) * 12;
 
@@ -888,14 +898,14 @@ function simulateEntnahmeReal({
   }
 
   return {
-  rReal,
-  yearsToZero,
-  k30,
-  k60,
-  kTarget,
-  nachhaltig,
-  benoetigtesKapital
-};
+    rReal,
+    yearsToZero,
+    k30,
+    k60,             
+    kTarget,
+    nachhaltig,
+    benoetigtesKapital
+  };
 }
 
 // --- Modus Auswahl ---
@@ -908,8 +918,6 @@ function selectMode(m, el){
 
     el.classList.add("active");
 
-    gotoStep(STEP.INPUT);
-
     const container = document.getElementById("inputs-container");
     container.innerHTML = "";
 
@@ -920,8 +928,9 @@ function selectMode(m, el){
 inputmode="decimal" placeholder="Startkapital (€)">
 <input id="pmt" type="text"
 inputmode="decimal" placeholder="Monatliche Sparrate (€)">
-<input id="jahre" type="text"
-inputmode="decimal" placeholder="Anlagedauer (Jahre)">
+<input id="jahre" type="number" inputmode="numeric"
+min="1" max="100" step="1"
+placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
 <input id="zins" type="text"
 inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
 
@@ -945,8 +954,9 @@ inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach a
 inputmode="decimal" placeholder="Startkapital (€)">
         <input id="ziel" type="text"
 inputmode="decimal" placeholder="Zielkapital (€)">
-        <input id="jahre" type="text"
-inputmode="decimal" placeholder="Anlagedauer (Jahre)">
+        <input id="jahre" type="number" inputmode="numeric"
+min="1" max="100" step="1"
+placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
         <input id="zins" type="text"
 inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
 
@@ -1113,38 +1123,6 @@ function goToStrategy(){
 
   // ===== CUSTOM STRATEGIE =====
 
-function askCustomWeights(){
-
-    customWeights = [];
-    let total = 0;
-
-    for(let i=1; i<=customCount; i++){
-
-        const w = prompt(`Gewichtung ETF ${i} in %:`);
-
-        if(!w){
-            alert("Abgebrochen");
-            return;
-        }
-
-        const val = parseFloat(w);
-
-        if(val <= 0){
-            alert("Ungültige Eingabe");
-            return;
-        }
-
-        customWeights.push(val / 100);
-        total += val;
-    }
-
-    if(Math.round(total) !== 100){
-        alert("Summe muss 100% ergeben!");
-        return;
-    }
-
-    showCustomETFSelection();
-}
 
     gotoStep(STEP.STRATEGY);
 
@@ -1153,11 +1131,16 @@ function askCustomWeights(){
 
 function addCustomETF(){
 
-    const wkn = document.getElementById("new-wkn").value || "CUSTOM";
+    const rawWkn = (document.getElementById("new-wkn").value || "").trim();
+    const wkn = rawWkn ? rawWkn : ("CUSTOM_" + Date.now());
     const name = document.getElementById("new-name").value || "Eigener ETF";
 
-    const ter = parseNumberDE(document.getElementById("new-ter").value) / 100;
-const tf  = parseNumberDE(document.getElementById("new-tf").value) / 100;
+    let ter = parseNumberDE(document.getElementById("new-ter").value) / 100;
+    const tf  = parseNumberDE(document.getElementById("new-tf").value) / 100;
+
+    if(!isFinite(ter) || ter < 0) ter = 0;
+    if(!isFinite(tf)  || tf < 0)  tf  = 0;
+    if(tf > 1) tf = 1;
     const pos = document.getElementById("new-pos").value || "0";
    
 
@@ -1171,29 +1154,6 @@ const tf  = parseNumberDE(document.getElementById("new-tf").value) / 100;
 
 // --- ETF Auswahl ---
 
-
-function showCustomETFSelection(){
-
-
-    const container = document.getElementById("etf-tables");
-    container.innerHTML = "";
-
-    const allEtfs = etfData.world5.concat(etfData.em3).concat(etfData.variable4);
-
-    for(let i=0; i<customCount; i++){
-
-        const percent = (customWeights[i] * 100).toFixed(0);
-
-        container.innerHTML += createTable(
-            `ETF ${i+1} — ${percent}%`,
-            allEtfs,
-            "custom" + i
-        );
-    }
-
-    gotoStep(STEP.ETF);
-}
-
 function goToEtfs(){
 
     if(!strategy){
@@ -1205,15 +1165,26 @@ function goToEtfs(){
     container.innerHTML="";
 
     // ===== CUSTOM =====
-    if(strategy == 4){
-        gotoStep(STEP.ETF);  
-        document.getElementById("custom-box").style.display="block";
+  if(strategy == 4){
+  gotoStep(STEP.ETF);
 
-        // Berechnen erst nach Gewichtung!
-        document.getElementById("calc-btn").style.display="none";
+  // ✅ Customize-Box sichtbar machen
+  document.getElementById("custom-box").style.display = "block";
 
-        return;
-    }
+  // Optional: normale ETF-Tabellen oben leer lassen
+  document.getElementById("etf-tables").innerHTML = "";
+
+  // Reset Customize-UI sauber
+  document.getElementById("custom-step1").style.display = "block";
+  document.getElementById("custom-step2").style.display = "none";
+  document.getElementById("custom-step3").style.display = "none";
+  document.getElementById("calc-btn").style.display = "none";
+
+  customWeights = [];
+  customCount = 0;
+
+  return;
+}
 
     // ===== NORMALE STRATEGIEN =====
 
@@ -1246,34 +1217,36 @@ function createTable(title, etfs, name){
     html+="</tbody></table>";
     return html;
 }
-document.addEventListener("click", e=>{
 
-    const row = e.target.closest(".etf-row");
-    if(!row) return;
+document.addEventListener("click", (e) => {
+  const row = e.target.closest(".etf-row");
+  if (!row) return;
 
-    // RADIO (normale Strategien)
-    const radio = row.querySelector("input[type='radio']");
-    if(radio){
+  const radio = row.querySelector('input[type="radio"]');
+  const checkbox = row.querySelector('input[type="checkbox"]');
 
-        const name = radio.name;
+  // Wenn direkt aufs Input geklickt wurde, NICHT nochmal togglen
+  const clickedInput = e.target.matches('input[type="radio"], input[type="checkbox"]');
 
-        document.querySelectorAll(`input[name="${name}"]`)
-            .forEach(r => r.closest("tr").classList.remove("selected"));
+  if (radio) {
+    // Radio: immer selektieren (auch wenn nicht direkt Input geklickt)
+    const name = radio.name;
+    document.querySelectorAll(`input[name="${name}"]`).forEach(r => {
+      const tr = r.closest("tr");
+      if (tr) tr.classList.remove("selected");
+    });
 
-        radio.checked = true;
-        row.classList.add("selected");
-    }
+    radio.checked = true;
+    row.classList.add("selected");
+  }
 
-    // CHECKBOX (Customize)
-    const checkbox = row.querySelector("input[type='checkbox']");
-    if(checkbox){
+  if (checkbox) {
+    // Checkbox: nur togglen wenn NICHT direkt auf Checkbox geklickt (sonst macht der Browser das)
+    if (!clickedInput) checkbox.checked = !checkbox.checked;
+    row.classList.toggle("selected", checkbox.checked);
+  }
 
-        checkbox.checked = !checkbox.checked;
-
-        row.classList.toggle("selected", checkbox.checked);
-    }
-
-    updateETFInfos();
+  updateETFInfos();
 });
 
    
@@ -1285,7 +1258,24 @@ function berechnen(){
    const PV = parseEuro(document.getElementById("pv")?.value);
 const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
 const ziel = parseEuro(document.getElementById("ziel")?.value);
-    const jahre = parseNumberDE(document.getElementById("jahre")?.value) || 0;
+    let jahre = null;
+
+if(mode === "endkapital" || mode === "sparrate"){
+    const el = document.getElementById("jahre");
+    if(!el){
+        alert("Anlagedauer fehlt");
+        return;
+    }
+
+    jahre = parseNumberDE(el.value);
+
+    if(!jahre || jahre < 1 || jahre > 100){
+        alert("Bitte gültige Anlagedauer (1–100 Jahre) eingeben");
+        return;
+    }
+
+    jahre = Math.round(jahre);
+}
     const zins  = parseNumberDE(document.getElementById("zins")?.value) / 100;
     const entnahme = parseEuro(document.getElementById("entnahme")?.value);
     function withdrawalNetFactor(kirchensteuer, steuerFaktor){
@@ -1352,14 +1342,25 @@ if(strategy == 4){
         return;
     }
 
-    checked.forEach((c,i)=>{
-        const etf = allETFs[c.value];
+let weightError = false;
 
-        selectedETFs.push({
-            ...etf,
-            weight: customWeights[i]
-        });
-    });
+checked.forEach((c)=>{
+  const etf = allETFs[c.value];
+  const weight = customWeights?.[etf.wkn];
+
+  if (weight === undefined) {
+    weightError = true;
+    return;
+  }
+
+  selectedETFs.push({ ...etf, weight });
+});
+
+if (weightError) {
+  alert("Fehler: Gewicht fehlt (Customize). Bitte Gewichte erneut eingeben.");
+  return;
+}
+
 }
 
 
@@ -1379,8 +1380,18 @@ const steuerFaktor = 1 - portfolioTF;
 // Summe der Einzel-TER (ungewichtet)
 const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
 
-    const yearsForScenario = (mode === "entnahme" || mode === "entnahme_kapital") ? 30 : jahre;
-const [rw,ra,rb] = (zins > 0) ? [zins,zins,zins] : getZinsen(yearsForScenario);
+    let rw, ra, rb;
+
+//  Ansparzeit: immer feste Zinssätze 5% / 6% / 8%
+if (mode === "ansparzeit") {
+  rw = 0.05;
+  ra = 0.06;
+  rb = 0.08;
+} else {
+  // für alle anderen Modi wie bisher
+  const yearsForScenario = (mode === "entnahme" || mode === "entnahme_kapital") ? 30 : jahre;
+  [rw, ra, rb] = (zins > 0) ? [zins, zins, zins] : getZinsen(yearsForScenario);
+}
 
     function calc(r){
         const effektiverZins = Math.max(r - portfolioTER, -0.99);
@@ -1544,8 +1555,9 @@ if(mode === "entnahme"){
     verzehrArt: verzehr
   });
 
-  const horizon = (verzehr === "mit" ? (verzehrJahre || 30) : 30);
-const endRealH = sim.kTarget ?? sim.k30;
+    // ✅ Für die Anzeige immer "Kapital nach 30 Jahren (real)"
+  const horizon = 30;
+  const endRealH = sim.k30;
 
   return {
     end: endRealH,
@@ -1555,10 +1567,10 @@ const endRealH = sim.kTarget ?? sim.k30;
     dauer: sim.yearsToZero,
     PMT: PMT_INPUT,
     rReal: sim.rReal,
-    k60: sim.k60,
+    k30: sim.k30,
     nachhaltig: sim.nachhaltig,
     benoetigtesKapital: sim.benoetigtesKapital,
-    horizonYears: (verzehr === "mit" ? (verzehrJahre || 30) : 30),
+    horizonYears: 30,
 
     // Zusatz für UI:
     desiredNet,
@@ -1698,16 +1710,20 @@ if(mode === "endkapital"){
   // Durchschnitts-Szenario: ra
   const effektivZinsAvg = Math.max(ra - portfolioTER, -0.99);
 
-  // Jahresreihe 1..jahre (mit TER-Effekt via effektivZinsAvg)
-  const yearsInt = Math.max(1, Math.round(jahre));
- const netSeries = buildYearSeriesNetto(
-  PV,
-  PMT_INPUT,
-  effektivZinsAvg,
-  yearsInt,
-  steuerFaktor,
-  kirchensteuer
-);
+  // Jahresreihe 1..jahre (Chart: immer korrekt 1..100)
+  const jahreRaw = document.getElementById("jahre")?.value;
+  let yearsInt = parseInt(String(jahreRaw || "").replace(/[^\d]/g, ""), 10);
+  if(!Number.isFinite(yearsInt)) yearsInt = 1;
+  yearsInt = Math.min(100, Math.max(1, yearsInt));
+
+  const netSeries = buildYearSeriesNetto(
+    PV,
+    PMT_INPUT,
+    effektivZinsAvg,
+    yearsInt,
+    steuerFaktor,
+    kirchensteuer
+  );
 
 const investedSeries = buildYearSeriesInvested(PV, PMT_INPUT, yearsInt);
 
@@ -1719,7 +1735,7 @@ const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
 if(chartWrap){
   chartWrap.style.display = "block";
   const canvas = document.getElementById("avgChart");
-  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries);
+  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries, PV);
 }
 
 
@@ -1765,17 +1781,12 @@ vergleichHTML = `
       <td>${(b.rReal*100).toFixed(2)}%</td>
     </tr>
 
-    <tr><td>Kapital nach ${a.horizonYears || 30} Jahren (real)</td>
+      <tr><td>Kapital nach 30 Jahren (real)</td>
       <td>${euro(w.end)}</td>
       <td>${euro(a.end)}</td>
       <td>${euro(b.end)}</td>
     </tr>
 
-    <tr><td>Kapital nach 60 Jahren (real)</td>
-      <td>${euro(w.k60)}</td>
-      <td>${euro(a.k60)}</td>
-      <td>${euro(b.k60)}</td>
-    </tr>
   `;
 
   if(verzehr === "mit"){
@@ -1873,11 +1884,11 @@ else {
         <td>${euro(a.end)}</td>
         <td>${euro(b.end)}</td>
     </tr>
-    <tr><td>TER-Kosten</td>
-        <td>${euro(w.kosten)}</td>
-        <td>${euro(a.kosten)}</td>
-        <td>${euro(b.kosten)}</td>
-    </tr>
+   <tr><td>Kosten durch TER (Opportunitätskosten)</td>
+    <td>${euro(w.kosten)}</td>
+    <td>${euro(a.kosten)}</td>
+    <td>${euro(b.kosten)}</td>
+</tr>
     <tr><td>Steuern (nur Gewinn)</td>
         <td>${euro(w.steuer)}</td>
         <td>${euro(a.steuer)}</td>
@@ -1930,9 +1941,10 @@ if(mode === "entnahme"){
   `;
   if(zins > 0){
     infoHTML += `<p><strong>Zins (manuell):</strong> ${(zins*100).toFixed(2)}%</p>`;
-  } 
+  }
+}
 
-  if(mode === "entnahme_kapital"){
+if(mode === "entnahme_kapital"){
   const entnahmeTxt = (entnahmeFreq === "monatlich") ? "monatlich" : "jährlich";
   const verzehrTxt = (verzehr === "mit") ? "Mit Kapitalverzehr (30 Jahre)" : "Ohne Kapitalverzehr (ewig)";
 
@@ -1948,7 +1960,6 @@ if(mode === "entnahme"){
   }
 }
 
-}
 
 if(mode=="endkapital"||mode=="sparrate")
     infoHTML += `<p><strong>Startkapital:</strong> ${euro(PV)}</p>`;
@@ -1970,9 +1981,16 @@ if(zins>0)
     infoHTML += `<p><strong>Jahreszins:</strong> ${(zins*100).toFixed(2)}%</p>`;
 
 // --- Investiertes Kapital berechnen ---
-let investiertesKapital =
-    PV + PMT_INPUT * 12 * (mode==="ansparzeit" ? a.dauer : jahre);
-infoHTML += `<p><strong>Investiertes Kapital:</strong> ${euro(investiertesKapital)}</p>`;
+// --- Investiertes Kapital nur dort anzeigen, wo es Sinn ergibt ---
+let investiertesKapital = null;
+
+if (mode === "endkapital" || mode === "sparrate" || mode === "ansparzeit") {
+  const pmtForInvest = (mode === "sparrate") ? a.PMT : PMT_INPUT;
+  const yearsForInvest = (mode === "ansparzeit") ? a.dauer : jahre;
+
+  investiertesKapital = PV + (pmtForInvest || 0) * 12 * yearsForInvest;
+  infoHTML += `<p><strong>Investiertes Kapital:</strong> ${euro(investiertesKapital)}</p>`;
+}
 
 
 document.getElementById("info-inputs").innerHTML = infoHTML;
@@ -1981,18 +1999,18 @@ document.getElementById("info-inputs").innerHTML = infoHTML;
 const etfBox = document.getElementById("info-etfs");
 etfBox.innerHTML = "";
 
-// Gesamtinvestition: Startkapital + monatliche Sparrate * Monate
-let gesamtInvest =
-    PV + (mode==="sparrate" ? a.PMT : PMT_INPUT) * 12 * jahre;
 // ===== ETF-LISTE ANZEIGEN =====
 
+const showAmount = (mode === "endkapital" || mode === "sparrate" || mode === "ansparzeit");
 selectedETFs.forEach(e=>{
-    etfBox.innerHTML += `
-        <p>
-            <strong>${(e.weight*100).toFixed(0)}%</strong> 
-            ${e.name}<br>
-            <small>WKN: ${e.wkn} – TER: ${(e.ter*100).toFixed(2)}%</small>
-        </p>`;
+  const amount = showAmount ? (investiertesKapital * e.weight) : null;
+
+  etfBox.innerHTML += `
+    <p>
+      <strong>${(e.weight*100).toFixed(0)}%</strong> ${e.name}
+      ${showAmount ? `<br><small>Betrag (≈ investiert): ${euro(amount)}</small>` : ""}
+      <br><small>WKN: ${e.wkn} – TER: ${(e.ter*100).toFixed(2)}%</small>
+    </p>`;
 });
 
 
@@ -2134,8 +2152,8 @@ if(restBox){
     });
 }
 
-}
 
+}
 // ===== CUSTOM STEP 1 =====
 function customStep1(){
 
@@ -2143,9 +2161,25 @@ function customStep1(){
         document.getElementById("custom-count").value
     );
 
-   if(!customCount || customCount < 1 || customCount > 100){
-    alert("Bitte gültige Anzahl eingeben");
-    return;
+  if(!customCount || customCount < 1 || customCount > 100){
+  alert("Bitte gültige Anzahl eingeben");
+  return;
+}
+
+// ✅ Max nach verfügbaren ETFs begrenzen (inkl. customOnlyETFs)
+const allETFs = [
+  ...etfData.world5,
+  ...etfData.world3,
+  ...etfData.em3,
+  ...etfData.variable4,
+  ...customOnlyETFs
+];
+
+const maxAvail = allETFs.length;
+
+if(customCount > maxAvail){
+  alert(`Du kannst maximal ${maxAvail} ETFs auswählen (so viele sind aktuell verfügbar).`);
+  return;
 }
 
     document.getElementById("custom-step1").style.display="none";
@@ -2179,15 +2213,18 @@ function customStep2(){
 
     container.innerHTML = "";
 
-  selected.forEach((c,i)=>{
+  selected.forEach((c)=>{
 
     const row = c.closest("tr");
-    const name = row.children[2].innerText;
+const tds = row.querySelectorAll("td");
+const wkn = (tds[1]?.innerText || "").trim();
+const name = (tds[2]?.innerText || "").trim();
 
     container.innerHTML += `
         <label>${name} Gewicht (%)</label>
         <input type="text"
-inputmode="decimal" id="w${i}">
+               inputmode="decimal"
+               data-wkn="${wkn}">
     `;
 });
 }
@@ -2195,35 +2232,36 @@ inputmode="decimal" id="w${i}">
 
 // ===== STEP 3 — GEWICHTUNG =====
 function finishCustom(){
+  const inputs = document.querySelectorAll("#weight-inputs input");
 
-  const weights = [];
+  let weightMap = {};
+  let sum = 0;
 
-  for(let i=0;i<customCount;i++){
-    const val = parseNumberDE(document.getElementById(`w${i}`).value);
-    if(!val){
-      alert("Alle Gewichte eingeben");
+  for (const input of inputs) {
+    const wkn = input.dataset.wkn;
+    const val = parseNumberDE(input.value);
+
+    if (!val || val <= 0) {
+      alert("Alle Gewichte eingeben (größer 0)");
       return;
     }
-    weights.push(val);
+
+    weightMap[wkn] = val / 100;
+    sum += val;
   }
 
-  const sum = weights.reduce((a,b)=>a+b,0);
-  if(Math.round(sum) !== 100){
+  // toleranter als Math.round(sum) (sonst nervig bei Kommawerten)
+  if (Math.abs(sum - 100) > 0.01) {
     alert("Summe muss 100% sein");
     return;
   }
 
-  customWeights = weights.map(w=>w/100);
+  // global speichern, damit berechnen() es findet
+  customWeights = weightMap;
 
-  // Schritt 3 ausblenden
-  document.getElementById("custom-step3").style.display="none";
-
-  // Optional: Custom-Box ausblenden (damit Ergebnis sauber wirkt)
-  document.getElementById("custom-box").style.display="none";
-
-  berechnen();
+  document.getElementById("custom-step3").style.display = "none";
+  document.getElementById("calc-btn").style.display = "block";
 }
-
 // ===== EURO-EINGABE FORMATIERUNG =====
 
 function parseNumberDE(str){
@@ -2239,13 +2277,20 @@ function parseNumberDE(str){
 }
 
 function parseEuro(str){
-    if(!str) return 0;
+  if(str === undefined || str === null) return 0;
+  str = String(str).replace("€","").trim();
+  return parseFloat(
+    str.replace(/\./g, "").replace(",", ".")
+  ) || 0;
+}
 
-    // 1.000,00 -> 1000.00
-    return parseFloat(
-        str.replace(/\./g, "")
-           .replace(",", ".")
-    ) || 0;
+function limitYears(el){
+  if(!el) return;
+  let v = parseInt(String(el.value).replace(/[^\d]/g,""), 10);
+  if(isNaN(v)) { el.value = ""; return; }
+  if(v < 1) v = 1;
+  if(v > 100) v = 100;
+  el.value = v;
 }
 
 function formatEuroInput(el){
@@ -2271,12 +2316,83 @@ function formatEuroInput(el){
     });
 }
 
-// automatische Aktivierung für alle Geldfelder
-document.addEventListener("input", e=>{
-  if(e.target.matches("#pv, #pmt, #ziel, #entnahme")){
-    formatEuroInput(e.target);
+// ===== EURO-EINGABE FORMATIERUNG (LIVE mit Tausenderpunkten) =====
+
+// Welche Felder sollen live formatiert werden?
+const EURO_FIELDS = "#pv, #pmt, #ziel, #entnahme";
+const PERCENT_FIELDS = "#zins, #inflation, #new-ter, #new-tf";
+const YEARS_FIELDS = "#verzehr_jahre";
+
+function formatNumberDELive(el, maxDecimals = 2){
+  if(!el) return;
+
+  const old = String(el.value ?? "");
+  const selStart = el.selectionStart ?? old.length;
+
+  // Wie viele Ziffern stehen links vom Cursor? (Hilft Cursor-Position zu behalten)
+  const digitsLeft = old.slice(0, selStart).replace(/[^\d]/g, "").length;
+
+  // 1) Eingabe säubern: nur Ziffern + Komma/Punkt
+  let v = old.replace(/[^\d,\.]/g, "");
+
+if (v.includes(".") && !v.includes(",")) {
+  const isDecimalLike = /^\d+\.\d{1,2}$/.test(v); // max 2 Nachkommastellen
+  if (isDecimalLike) {
+    v = v.replace(".", ","); // z.B. 7.5 -> 7,5
+  } else {
+    v = v.replace(/\./g, ""); // z.B. 1.000 oder 1.000.000 -> Punkte raus
   }
+}
+
+  // 3) Nur ein Dezimaltrenner (Komma) erlauben
+  const firstComma = v.indexOf(",");
+  let intPart = "";
+  let decPart = "";
+
+  if(firstComma !== -1){
+    intPart = v.slice(0, firstComma).replace(/[^\d]/g, "");
+    decPart = v.slice(firstComma + 1).replace(/[^\d]/g, "").slice(0, maxDecimals);
+  } else {
+    intPart = v.replace(/[^\d]/g, "");
+  }
+
+  // 4) Tausenderpunkte setzen (de-DE)
+  // Führende Nullen reduzieren, aber "0" erlauben
+  intPart = intPart.replace(/^0+(?=\d)/, "");
+
+  const intFormatted = intPart
+    ? intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    : "";
+
+  const newVal = (firstComma !== -1)
+    ? (intFormatted + "," + decPart)
+    : intFormatted;
+
+  el.value = newVal;
+
+  // 5) Cursor wieder ungefähr dahin setzen, wo er logisch sein soll
+  // Wir setzen Cursor nach der gleichen Anzahl "Ziffern links"
+  let pos = 0;
+  let seenDigits = 0;
+  while(pos < newVal.length && seenDigits < digitsLeft){
+    if(/\d/.test(newVal[pos])) seenDigits++;
+    pos++;
+  }
+  el.setSelectionRange(pos, pos);
+}
+
+// Live beim Tippen formatieren
+document.addEventListener("input", (e)=>{
+  if (e.target.matches(EURO_FIELDS)) return formatNumberDELive(e.target, 2);
+  if (e.target.matches(PERCENT_FIELDS)) return formatNumberDELive(e.target, 2);
+  if (e.target.matches(YEARS_FIELDS)) return formatNumberDELive(e.target, 2);
 });
+
+// Optional: beim Fokusverlust nochmal sauber lassen (eigentlich nicht nötig, aber okay)
+document.addEventListener("blur", (e)=>{
+  if(!e.target.matches(EURO_FIELDS)) return;
+  formatNumberDELive(e.target, 2);
+}, true);
 
 function buildCustomTable(){
 
@@ -2352,20 +2468,20 @@ function buildYearSeriesNetto(PV, PMT, effektivZins, jahre, steuerFaktor, kirche
   const monatszins = effektivZins / 12;
   let value = PV;
 
+  // gleicher Steuersatz wie im Ergebnis
+  const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0));
+
   for(let y=1; y<=jahre; y++){
+    // erst Brutto-Depotwert bis Jahresende aufbauen
     for(let m=1; m<=12; m++){
       value = value * (1 + monatszins) + PMT;
     }
 
+    // dann: Netto, falls Verkauf genau am Ende von Jahr y
     const einzahlungen = PV + PMT * 12 * y;
     const gewinnBrutto = Math.max(0, value - einzahlungen);
 
-    const gewinnSteuerpflichtig = gewinnBrutto * steuerFaktor;
-    const abgeltung = gewinnSteuerpflichtig * 0.25;
-    const soli = abgeltung * 0.055;
-    const kirche = abgeltung * (kirchensteuer || 0);
-
-    const steuer = abgeltung + soli + kirche;
+    const steuer = gewinnBrutto * steuerFaktor * taxRate;
     const net = value - steuer;
 
     series.push(net);
@@ -2387,7 +2503,7 @@ function formatEUR(x){
   return x.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
 }
 
-function renderStackedBarChart(canvas, labels, invested, interest, net){
+function renderStackedBarChart(canvas, labels, invested, interest, net, basePV){
   if(!canvas) return;
 
   const ctx = canvas.getContext("2d");
@@ -2455,56 +2571,99 @@ function renderStackedBarChart(canvas, labels, invested, interest, net){
   ctx.lineTo(w - padR, h - padB);
   ctx.stroke();
 
- // Balken-Geometrie (immer dünn) 
-    const n = labels.length;
-    const barW = 8;                   // <- feste, dünne Balkenbreite (px)
-    const gap = Math.max(6, Math.floor((plotW - barW*n) / Math.max(1, n-1))); // verteilt Rest als Abstand
+  // Balken-Geometrie (sauber zentriert + mehr Luft am Rand)
+  const n = labels.length;
+
+  // Mehr Abstand links/rechts innerhalb der Achsen (damit nichts "klebt")
+  const edgePad = 28;
+
+  // Verfügbare Plotbreite innerhalb der Achsen (abzüglich Randpad)
+  const innerPlotW = Math.max(1, plotW - edgePad * 2);
+
+  // Slot je Balken:
+  // - bei vielen Jahren: innerPlotW/n
+  // - bei wenigen Jahren: Slot nicht zu groß werden lassen
+  const MAX_SLOT = 60;
+  const slot = Math.min(innerPlotW / n, MAX_SLOT);
+
+  // Balkenbreite relativ zum Slot
+  const barW = Math.max(2, Math.floor(slot * 0.60));
+  const barOffset = (slot - barW) / 2;
+
+  // Gesamtbreite der Balkengruppe
+  const groupW = slot * n;
+
+  // StartX: zentriert, aber mindestens edgePad Abstand zu Achse
+  const startX = padL + edgePad + Math.max(0, (innerPlotW - groupW) / 2);
 
   // Hover-Hitboxen speichern
   const bars = [];
 
   for(let i=0;i<n;i++){
-    const x = padL + i*(barW + gap);
+  const x = startX + i*slot + barOffset;
 
-    const inv = invested[i] || 0;
-    const intv = interest[i] || 0;
+  const inv = invested[i] || 0;
+  const intv = interest[i] || 0;
 
-    // Grün (investiert)
-    const yInvTop = yToPx(inv);
-    const invH = (h - padB) - yInvTop;
+  const yInvTop = yToPx(inv);
+  const invH = (h - padB) - yInvTop;
 
-    ctx.fillStyle = "#4CAF50";         // Grün
-    ctx.fillRect(x, yInvTop, barW, invH);
+  ctx.fillStyle = "#4CAF50";
+  ctx.fillRect(x, yInvTop, barW, invH);
 
- // Blau (Zinszuwachs) – kann positiv ODER negativ sein
-const total = inv + intv;
-const yTotal = yToPx(total);
+  const total = inv + intv;
+  const yTotal = yToPx(total);
 
-ctx.fillStyle = "#2196F3"; // Blau
+  ctx.fillStyle = "#2196F3";
 
-if(intv >= 0){
-  // positiv: oben drauf
-  const yTopBlue = yTotal;
-  const blueH = yInvTop - yTotal;           // positiv
-  ctx.fillRect(x, yTopBlue, barW, blueH);
-} else {
-  // negativ: nach unten ab Investiert-Top
-  const yTopBlue = yInvTop;
-  const blueH = yTotal - yInvTop;           // positiv (weil yTotal > yInvTop)
-  ctx.fillRect(x, yTopBlue, barW, blueH);
+  if(intv >= 0){
+    const yTopBlue = yTotal;
+    const blueH = yInvTop - yTotal;
+    ctx.fillRect(x, yTopBlue, barW, blueH);
+  } else {
+    const yTopBlue = yInvTop;
+    const blueH = yTotal - yInvTop;
+    ctx.fillRect(x, yTopBlue, barW, blueH);
+  }
+
+    const yTop = Math.min(yInvTop, yTotal);
+    const yBottom = Math.max(yInvTop, yTotal);
+    const barH = Math.max(1, yBottom - yTop);   
+
+  bars.push({ i, x, y: yTop, w: barW, h: barH });
 }
 
-// Hitbox: gesamte sichtbare Höhe (egal ob positiv/negativ)
-const yTop = Math.min(yInvTop, yTotal);
-const yBottom = Math.max(yInvTop, yTotal);
-const barH = (h - padB) - yTop;
-  
-bars.push({ i, x, y: yTop, w: barW, h: barH });
+
+ // X-Achse Labels (zeigt 1,10,20,... und immer das letzte Jahr)
+ctx.fillStyle = "#555";
+ctx.textAlign = "center";
+ctx.textBaseline = "top";
+
+const yAxis = h - padB;
+const tickY = yAxis + 8;
+
+for(let j=0; j<n; j++){
+  const year = parseInt(labels[j], 10);
+  const shouldLabel = (year === 1) || (year % 10 === 0) || (j === n - 1);
+  if(!shouldLabel) continue;
+
+  const xCenter = startX + j * slot + barOffset + barW / 2;
+
+  ctx.strokeStyle = "#aaa";
+  ctx.beginPath();
+  ctx.moveTo(xCenter, yAxis);
+  ctx.lineTo(xCenter, yAxis + 4);
+  ctx.stroke();
+
+  ctx.fillText(String(year), xCenter, tickY);
 }
+
+
+
 
 
   // in global payload speichern (für Resize + Hover)
-  _lastChartPayload = { labels, invested, interest, net, bars };
+  _lastChartPayload = { labels, invested, interest, net, bars, basePV };
 
   // Tooltip-Helfer
   function hideTip(){
@@ -2514,41 +2673,39 @@ bars.push({ i, x, y: yTop, w: barW, h: barH });
 function showTipByBar(idx){
   if(!tooltip) return;
 
-  const year = labels[idx];
-  const inv = invested[idx] || 0;
+  const year = parseInt(labels[idx], 10) || (idx + 1);
 
-  // kumulierter Zinszuwachs bis Ende Jahr (das hast du schon)
-  const intvCum = interest[idx] || 0;
+  const invCum = invested[idx] || 0;
+  const prevInvCum = idx > 0 ? (invested[idx - 1] || 0) : (basePV || 0);
+  const invYear = Math.max(0, invCum - prevInvCum);
 
-  // Netto gesamt bis Ende Jahr
-  const totalNet = net[idx] ?? (inv + intvCum);
+  const intCum = interest[idx] || 0;
+  const totalNet = net[idx] ?? (invCum + intCum);
 
-  // ✅ Zinszuwachs NUR in diesem Jahr:
-  // Netto-Veränderung im Jahr minus Investitions-Veränderung im Jahr
   const prevNet = idx > 0 ? (net[idx - 1] ?? 0) : 0;
-  const prevInv = idx > 0 ? (invested[idx - 1] ?? 0) : 0;
+  const prevInv = idx > 0 ? (invested[idx - 1] ?? 0) : (basePV || 0);
 
   const netDeltaYear = totalNet - prevNet;
-  const invDeltaYear = inv - prevInv;
+  const invDeltaYear = invCum - prevInv;
 
-  const intvYear = (idx === 0) ? intvCum : (netDeltaYear - invDeltaYear);
+  const intYear = (idx === 0) ? intCum : (netDeltaYear - invDeltaYear);
 
   tooltip.innerHTML = `
     <div style="font-weight:700; margin-bottom:6px;">Jahr ${year}</div>
 
     <div class="row">
-      <span><span class="dot" style="background:#4CAF50;"></span>Investiert</span>
-      <span><b>${formatEUR(inv)}</b></span>
+      <span><span class="dot" style="background:#4CAF50; opacity:.55;"></span>Investiert (im Jahr)</span>
+      <span><b>${formatEUR(invYear)}</b></span>
     </div>
 
     <div class="row">
       <span><span class="dot" style="background:#2196F3;"></span>Zinszuwachs (gesamt)</span>
-      <span><b>${formatEUR(intvCum)}</b></span>
+      <span><b>${formatEUR(intCum)}</b></span>
     </div>
 
     <div class="row">
       <span><span class="dot" style="background:#2196F3; opacity:.55;"></span>Zinszuwachs (im Jahr)</span>
-      <span><b>${formatEUR(intvYear)}</b></span>
+      <span><b>${formatEUR(intYear)}</b></span>
     </div>
 
     <div class="row" style="margin-top:6px; padding-top:6px; border-top:1px solid #eee;">
@@ -2557,14 +2714,12 @@ function showTipByBar(idx){
     </div>
   `;
 
-  // passenden Balken holen
   const bar = bars.find(b => b.i === idx);
   if(!bar) return;
 
   tooltip.style.display = "block";
 
   const wrapRect = wrap.getBoundingClientRect();
-
   const offsetX = 10;
   let left = bar.x + bar.w + offsetX;
 
@@ -2611,9 +2766,9 @@ function showTipByBar(idx){
 let _lastChartPayload = null;
 window.addEventListener("resize", ()=>{
   if(!_lastChartPayload) return;
-  const {labels, invested, interest, net} = _lastChartPayload;
+  const {labels, invested, interest, net, basePV} = _lastChartPayload;
   const canvas = document.getElementById("avgChart");
-  renderStackedBarChart(canvas, labels, invested, interest, net);
+  renderStackedBarChart(canvas, labels, invested, interest, net, basePV);
 });
 
 // ===== ENTER = immer "Weiter" =====
@@ -2668,7 +2823,7 @@ document.addEventListener("keydown", (e) => {
 
 });
 
+
 </script>
 </body>
 </html> 
-
