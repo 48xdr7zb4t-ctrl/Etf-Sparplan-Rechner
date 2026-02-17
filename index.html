@@ -1486,7 +1486,12 @@ const current = {};
 let anyMissing = false;
 
 selectedETFs.forEach(e=>{
-  const v = parseEuro(document.getElementById(`cur_${e._rbKey}`)?.value);
+  const el = document.getElementById(`cur_${e._rbKey}`);
+  const raw = (el?.value ?? "").trim();
+
+  if(raw === "") { anyMissing = true; current[e._rbKey] = 0; return; }
+
+  const v = parseEuro(raw);
   if(!isFinite(v) || v < 0) anyMissing = true;
   current[e._rbKey] = Math.max(0, v);
 });
@@ -1500,15 +1505,19 @@ selectedETFs.forEach(e=>{
   const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0);
   const newTotal = curTotal + pmt;
 
-  const targetValue = {};
-  selectedETFs.forEach(e=>{
-    targetValue[e._rbKey] = newTotal * e.weight;
-  });
+const targetValue = {};
+selectedETFs.forEach(e=>{
+  targetValue[e._rbKey] = newTotal * e.weight;
+});
 
+// needs berechnen (nur Untergewichtungen)
+const needs = selectedETFs.map(e=>{
+  const cur = current[e._rbKey] || 0;
+  const need = Math.max(0, (targetValue[e._rbKey] || 0) - cur);
+  return { _rbKey: e._rbKey, need };
+});
 
-return { _rbKey: e._rbKey, wkn:e.wkn, name:e.name, weight:e.weight, current: current[e._rbKey]||0, need };
-
-  const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
+const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
 
   const buy = {};
   selectedETFs.forEach(e=> buy[e._rbKey] = 0);
@@ -1518,7 +1527,7 @@ return { _rbKey: e._rbKey, wkn:e.wkn, name:e.name, weight:e.weight, current: cur
   } else if(sumNeed >= pmt){
     needs.forEach(x => buy[x._rbKey] = pmt * (x.need / sumNeed));
   } else {
-    needs.forEach(x => buy[x.wkn] = x.need);
+    needs.forEach(x => buy[x._rbKey] = x.need);
     const rest = pmt - sumNeed;
     selectedETFs.forEach(e => {
       buy[e._rbKey] += rest * e.weight;
@@ -1592,6 +1601,12 @@ return { _rbKey: e._rbKey, wkn:e.wkn, name:e.name, weight:e.weight, current: cur
    const PV = parseEuro(document.getElementById("pv")?.value);
 const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
 const ziel = parseEuro(document.getElementById("ziel")?.value);
+
+if((mode === "sparrate" || mode === "ansparzeit") && (!ziel || ziel <= 0)){
+  alert("Bitte gültiges Zielkapital eingeben");
+  return;
+}
+
     let jahre = null;
 
 if(mode === "endkapital" || mode === "sparrate"){
@@ -3177,10 +3192,12 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 
   // MODE -> wenn Mode schon gewählt ist, weiter zur Eingabe
-  if (currentStep === STEP.MODE) {
-    if (mode) gotoStep(STEP.INPUT);
-    return;
-  }
+if (currentStep === STEP.MODE) {
+  if (!mode) return;
+  if (mode === "rebalancing") gotoStep(STEP.STRATEGY);
+  else gotoStep(STEP.INPUT);
+  return;
+}
 
   // INPUT -> Weiter zur Strategie
   if (currentStep === STEP.INPUT) {
