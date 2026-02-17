@@ -1502,18 +1502,22 @@ selectedETFs.forEach(e=>{
   }
 
   // 4) Rebalancing rechnen (ohne Verkäufe)
-  const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0);
-  const newTotal = curTotal + pmt;
+const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0);
+const newTotal = curTotal + pmt;
 
-const targetValue = {};
+//  Optimale Zielbeträge (2 Varianten)
+const targetNow = {};   // Zielbeträge, wenn man "heute" perfekt verteilt wäre
+const targetAfter = {}; // Zielbeträge nach Einzahlung (newTotal)
+
 selectedETFs.forEach(e=>{
-  targetValue[e._rbKey] = newTotal * e.weight;
+  targetNow[e._rbKey]   = curTotal * e.weight;
+  targetAfter[e._rbKey] = newTotal * e.weight;
 });
 
 // needs berechnen (nur Untergewichtungen)
 const needs = selectedETFs.map(e=>{
   const cur = current[e._rbKey] || 0;
-  const need = Math.max(0, (targetValue[e._rbKey] || 0) - cur);
+  const need = Math.max(0, (targetAfter[e._rbKey] || 0) - cur);
   return { _rbKey: e._rbKey, need };
 });
 
@@ -1547,11 +1551,13 @@ const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
     <tr><td>Aktuelles Depot (Summe)</td><td>—</td><td>${euro(curTotal)}</td><td>—</td></tr>
     <tr><td>Monatliche Sparrate</td><td>—</td><td>${euro(pmt)}</td><td>—</td></tr>
     <tr><td>Neuer Depotwert (nach Sparrate)</td><td>—</td><td>${euro(newTotal)}</td><td>—</td></tr>
+
     <tr><td colspan="4" style="text-align:left; padding-top:14px;"><b>Empfohlene Sparplan-Aufteilung</b></td></tr>
   `;
 
   selectedETFs.forEach(e=>{
-    const curW = curTotal > 0 ? (current[e._rbKey]/curTotal) : 0;
+    const curW = curTotal > 0 ? (current[e._rbKey] / curTotal) : 0;
+
     vergleichHTML += `
       <tr>
         <td style="text-align:left;">
@@ -1562,7 +1568,35 @@ const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
         <td style="text-align:left;">
           Aktuell: ${euro(current[e._rbKey])} (${(curW*100).toFixed(1)}%)<br>
           Kaufen: <b>${euro(buy[e._rbKey])}</b><br>
-          Neu: ${euro(newVal[e._rbKey])} (${(newW[e._rbKey]*100).toFixed(1)}%)
+          <br>Ziel (nach Sparrate): ${euro(targetAfter[e._rbKey])}
+        </td>
+        <td>—</td>
+      </tr>
+    `;
+  });
+
+  // Optimale Zielbeträge (Zusatzblock) NACHDEM vergleichHTML existiert
+  vergleichHTML += `
+    <tr><td colspan="4" style="text-align:left; padding-top:14px;"><b>Optimale Verteilung (Zielbeträge)</b></td></tr>
+  `;
+
+  selectedETFs.forEach(e=>{
+    const cur = current[e._rbKey] || 0;
+    const optNow = targetNow[e._rbKey] || 0;
+    const optAfter = targetAfter[e._rbKey] || 0;
+    const diffNow = cur - optNow;
+
+    vergleichHTML += `
+      <tr>
+        <td style="text-align:left;">
+          ${e.name}<br>
+          <small>WKN ${e.wkn} • Ziel ${(e.weight*100).toFixed(1)}%</small>
+        </td>
+        <td>—</td>
+        <td style="text-align:left;">
+          Optimal (heute): <b>${euro(optNow)}</b><br>
+          Optimal (nach Sparrate): <b>${euro(optAfter)}</b><br>
+          Abweichung aktuell vs. optimal (heute): <b>${euro(diffNow)}</b>
         </td>
         <td>—</td>
       </tr>
@@ -1579,14 +1613,18 @@ const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
 
   const etfBox = document.getElementById("info-etfs");
   etfBox.innerHTML = "";
-  selectedETFs.forEach(e=>{
-    etfBox.innerHTML += `
-      <p>
-        <strong>${(e.weight*100).toFixed(0)}%</strong> ${e.name}<br>
-        <small>WKN: ${e.wkn}</small>
-      </p>
-    `;
-  });
+
+
+selectedETFs.forEach(e=>{
+  etfBox.innerHTML += `
+    <p>
+      <strong>${(e.weight*100).toFixed(0)}%</strong> ${e.name}<br>
+      <small>WKN: ${e.wkn}</small><br>
+      <small>Optimal (heute): <b>${euro(targetNow[e._rbKey] || 0)}</b></small><br>
+      <small>Optimal (nach Sparrate): <b>${euro(targetAfter[e._rbKey] || 0)}</b></small>
+    </p>
+  `;
+});
 
   gotoStep(STEP.RESULT);
 
@@ -2073,7 +2111,7 @@ const netSeries = buildYearSeriesNetto(
   kirchensteuer
 );
 
-// ✅ Brutto (ohne Steuerabzug) – für "echten Zins" im Tooltip
+//  Brutto (ohne Steuerabzug) – für "echten Zins" im Tooltip
 const grossSeries = buildYearSeriesEndkapital(PV, PMT_INPUT, effektivZinsAvg, yearsInt);
 
 const investedSeries = buildYearSeriesInvested(PV, PMT_INPUT, yearsInt);
@@ -3016,7 +3054,7 @@ function renderStackedBarChart(canvas, labels, invested, interest, net, basePV, 
   }
 
 
-// ✅ Hitbox = ganzer Slot (viel leichter zu treffen)
+//  Hitbox = ganzer Slot (viel leichter zu treffen)
 const hitPadX = Math.max(6, Math.floor(slot * 0.20)); // extra Luft links/rechts im Slot
 const hitX = startX + i * slot + hitPadX;
 const hitW = Math.max(10, slot - hitPadX * 2);
@@ -3082,10 +3120,10 @@ function showTipByBar(idx){
   const netDeltaYear = totalNet - prevNet;
   const invDeltaYear = invCum - prevInv;
 
-  // ✅ Netto-"Zins im Jahr" (enthält Steuer-Effekt, weil Netto-Deltas)
+  //  Netto-"Zins im Jahr" (enthält Steuer-Effekt, weil Netto-Deltas)
   const intYearNet = (idx === 0) ? intCum : (netDeltaYear - invDeltaYear);
 
-  // ✅ Echter Zins im Jahr (BRUTTO, vor Steuer) aus Brutto-Serie
+  //  Echter Zins im Jahr (BRUTTO, vor Steuer) aus Brutto-Serie
   const grossTot = gross?.[idx] ?? (invCum + intCum); // Fallback
   const prevGross = (idx > 0) ? (gross?.[idx-1] ?? basePV) : (basePV || 0);
   const grossDeltaYear = grossTot - prevGross;
