@@ -225,8 +225,7 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
     <!-- Schritt 1 -->
     <div id="custom-step1">
         <label>Wie viele ETFs möchtest du?</label>
-        <input id="custom-count" type="text"
-inputmode="decimal" min="1" max="100">
+        <input id="custom-count" type="number" min="1" max="100" inputmode="numeric" placeholder="z.B. 3">
         <button onclick="customStep1()">Weiter</button>
         <button type="button" onclick="goBack()">Zurück</button>
     </div>
@@ -248,11 +247,11 @@ inputmode="decimal" min="1" max="100">
             <input id="new-wkn" placeholder="WKN">
             <input id="new-name" placeholder="Name">
             <input id="new-ter" type="text"
-inputmode="decimal" step="0.01" placeholder="TER %">
+            inputmode="decimal" step="0.01" placeholder="TER %">
             <input id="new-pos" type="text"
-inputmode="decimal" placeholder="Aktienanzahl">
+            inputmode="decimal" placeholder="Aktienanzahl">
             <input id="new-tf" type="text"
-inputmode="decimal" step="1" placeholder="Teilfreistellung %">
+            inputmode="decimal" step="1" placeholder="Teilfreistellung %">
 
           
 
@@ -338,6 +337,8 @@ inputmode="decimal" step="1" placeholder="Teilfreistellung %">
 
 <script>
 let mode = null;
+let _lastChartPayload = null;
+
 
 // ===== STEP NAVIGATION (Back ohne Reload) =====
 const STEP = {
@@ -425,7 +426,12 @@ history.replaceState({ step: STEP.MODE }, "", "#mode");
 
 let strategy = null;
 let customCount = 0;
-let customWeights = {}; // Map: { [wkn]: weight }
+
+let customWeights = {}; // Map: { [eid]: weight } 
+function makeEid(prefix="E"){
+  return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8);
+}
+
 let customUserETFs = [];
 let customOnlyETFs = [];
 let customFinished = false;
@@ -438,26 +444,52 @@ function getSelectedETFsFromUI(){
   const radios = document.querySelectorAll("#etf-box input[type='radio']:checked");
   radios.forEach(r=>{
     const row = r.closest("tr");
-    const wkn = row?.children[1]?.innerText?.trim();
-    const name = row?.children[2]?.innerText?.trim();
-    if(wkn) picked.push({ wkn, name });
+    const wkn  = row?.children[1]?.innerText?.trim() || "";
+    const name = row?.children[2]?.innerText?.trim() || "";
+
+    // Radio value ist Index -> daraus ETF holen und eid nehmen
+    const idx = parseInt(r.value, 10);
+    let etf = null;
+
+    // best effort: finde richtige Liste anhand radio.name
+    if(r.name === "etf1")   etf = etfData.world3[idx];
+    if(r.name === "etf2w")  etf = etfData.world5[idx];
+    if(r.name === "etf2em") etf = etfData.em3[idx];
+    if(r.name === "etf3w")  etf = etfData.world5[idx];
+    if(r.name === "etf3em") etf = etfData.em3[idx];
+    if(r.name === "etf3s")  etf = etfData.variable4[idx];
+
+    const eid = etf?.eid ? String(etf.eid) : "";
+
+    // fallback, falls irgendwas nicht passt
+    picked.push({ eid: eid || (wkn ? ("WKN_"+wkn) : ("IDX_"+idx)), wkn, name });
   });
 
-  // Customize (Checkboxes)
+  // Customize (Checkboxes) -> value ist eid
   const checks = document.querySelectorAll("#custom-box input[type='checkbox'][name='custom-select']:checked");
   checks.forEach(c=>{
-    const row = c.closest("tr");
-    const wkn = row?.children[1]?.innerText?.trim();
-    const name = row?.children[2]?.innerText?.trim();
-    if(wkn) picked.push({ wkn, name });
+    const row  = c.closest("tr");
+    const wkn  = row?.children[1]?.innerText?.trim() || "";
+    const name = row?.children[2]?.innerText?.trim() || "";
+    const eid  = String(c.value || "").trim();
+    if(eid) picked.push({ eid, wkn, name });
   });
 
-  // duplicates raus
+  // duplicates raus (nur noch über eid!)
   const seen = new Set();
-  picked = picked.filter(x => (seen.has(x.wkn) ? false : (seen.add(x.wkn), true)));
+  picked = picked.filter(x => (seen.has(x.eid) ? false : (seen.add(x.eid), true)));
 
   return picked;
+}
 
+function getETFMapByEid(){
+  const m = Object.create(null);
+  getAllETFsUnique().forEach(e=>{
+    const eid = String(e.eid || "").trim();
+    if(!eid) return;
+    m[eid] = e;
+  });
+  return m;
 }
 
 function updateRebalancingPanel(){
@@ -504,7 +536,10 @@ function updateRebalancingPanel(){
   `;
 
 picked.forEach((e, idx)=>{
-  const id = `cur_${idx}`; // <- garantiert unique
+  const key = e.eid ? String(e.eid) : String(idx);   // <-- stabil
+  const id  = `cur_${key}`;
+
+
   html += `
     <tr>
       <td style="text-align:left;">${e.name || ""}</td>
@@ -527,6 +562,22 @@ const etfData = {
     variable4:[{wkn:"A0RPWG",name:"iShares Core MSCI Europe",ter:0.0012,pos:"403",tf: 0.30 },{wkn:"A0YEDG",name:"iShares Core S&P 500 UCITS ETF",ter:0.0007,pos:"503",tf: 0.30 },{wkn:"DBX0WG",name:"Xtrackers MSCI World Small Cap",ter:0.0025,pos:"3.099",tf: 0.30 }]
 };
 
+
+function ensureEids(){
+  // etfData arrays
+  Object.values(etfData).forEach(arr=>{
+    arr.forEach(e=>{
+      if(!e.eid) e.eid = makeEid("STD");
+    });
+  });
+
+  // customOnlyETFs
+  customOnlyETFs.forEach(e=>{
+    if(!e.eid) e.eid = makeEid("CUS");
+  });
+}
+
+
 // ===== FESTER CUSTOM ETF =====
 customOnlyETFs.push({
     wkn: "LYX0Q0",
@@ -535,6 +586,10 @@ customOnlyETFs.push({
     pos: "612",
     tf: 0.30
 });
+
+
+
+ensureEids();
 
 const weights = {1:[1],2:[0.7,0.3],3:[0.5,0.3,0.2]};
 // --- Zusatzinfos zu heiligen ETFs ---
@@ -934,103 +989,232 @@ function berechneJahre(pv, pmt, ziel, zins){
     return Math.log((ziel * monatszins + pmt) / (pv * monatszins + pmt)) / (12 * Math.log(1 + monatszins));
 }
 
-// ===== ENTNAHMEPHASE (real / inflationsbereinigt) =====
+// ===== ENTNAHMEPHASE ( / inflationsbereinigt) =====
 function realRateFromNominal(nominal, inflation){
   // (1+r_nom)/(1+infl)-1
   return (1 + nominal) / (1 + inflation) - 1;
 }
 
-function simulateEntnahmeReal({
-  startKapital,
-  monatSparrate,
-  entnahmeBetrag,
-  freq,                // "monatlich" | "jaehrlich"
-  nominalRendite,      // z.B. 0.07
-  inflation,           // z.B. 0.02
-  yearsMax = 60,
-  verzehrArt           // "mit" | "ohne"
-}){
-  const rReal = realRateFromNominal(nominalRendite, inflation);
-  const rM = rReal / 12;
+function monthlyRateFromAnnual(annual){
+  // sauberer als annual/12
+  return Math.pow(1 + annual, 1/12) - 1;
+}
 
-  let k = startKapital;
-  const k0 = startKapital;
+// FIFO-Lots in "Wert"-Einheiten (ohne Stücke/Kurse)
+function fifoRemoveLots(lots, amount){
+  // lots: [{cost, value}]
+  // entfernt 'amount' value aus den ältesten lots
+  // returns {costRemoved, valueRemoved}
+  let remaining = amount;
+  let costRemoved = 0;
+  let valueRemoved = 0;
+
+  for(let i=0; i<lots.length && remaining > 0; ){
+    const lot = lots[i];
+    const take = Math.min(lot.value, remaining);
+
+    // Kostenanteil proportional zum entnommenen Wert aus diesem Lot
+    const costPart = (lot.value > 0) ? (lot.cost * (take / lot.value)) : 0;
+
+    lot.value -= take;
+    lot.cost  -= costPart;
+
+    costRemoved += costPart;
+    valueRemoved += take;
+    remaining -= take;
+
+    // leere Lots entfernen
+    if(lot.value <= 1e-9) lots.splice(i,1);
+    else i++;
+  }
+
+  return { costRemoved, valueRemoved };
+}
+
+function cloneLots(lots){
+  return lots.map(l => ({cost:l.cost, value:l.value}));
+}
+
+// Kern: nominal simulieren, Eingaben als "heutige Euro"  interpretieren
+function simulateEntnahmeNominalFIFO({
+  startKapitalReal,      // PV Eingabe: heutige Euro
+  startGewinneReal = 0,  
+  pmtReal,               // monatliche Sparrate: heutige Euro ( konstant)
+  withdrawNetReal,       // gewünschte netto Auszahlung: heutige Euro ( konstant)
+  freq,                  // "monatlich" | "jaehrlich"
+  nominalRendite,        // Rendite nach TER (nominal)
+  inflation,
+  yearsMax = 60,
+  verzehrArt,            // "mit" | "ohne"
+  steuerFaktor,          // = 1 - portfolioTF
+  kirchensteuer,
+  sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax  // 0 / 0.08 / 0.09
+ }){
+  const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0)); // Abg + Soli + Kirche
+  const rM = monthlyRateFromAnnual(nominalRendite);
+
+  // Start nominal =  zu t=0
+  let base = Math.max(0, startKapitalReal || 0);
+  let g0   = Math.max(0, startGewinneReal || 0);
+
+  let k = base + g0;
+
+  let lots = [];
+  if(base > 0) lots.push({ cost: base, value: base });
+  if(g0   > 0) lots.push({ cost: 0,    value: g0   });
 
   const monthsMax = Math.round(yearsMax * 12);
   let monthsToZero = null;
 
-  for(let m=1; m<=monthsMax; m++){
-    // Rendite
-    k = k * (1 + rM);
+    // Brutto der ersten Entnahme merken (für Anzeige)
+  let firstGrossNominal = null;
+  let firstGrossReal = null;
 
-    // Sparrate (real konstant)
-    k += (monatSparrate || 0);
+  // helper: wieviel nominal im Monat m (1..)
+  function inflFactor(m){
+    // m Monate -> m/12 Jahre
+    return Math.pow(1 + inflation, m/12);
+  }
 
-    // Entnahme (real konstant)
-    if(freq === "monatlich"){
-      k -= entnahmeBetrag;
-    } else {
-      // jährlich: am Ende jedes 12. Monats
-      if(m % 12 === 0) k -= entnahmeBetrag;
+  function sellFee(gross){
+  if(!gross || gross <= 0) return 0;
+
+  let fee = (feeFixed || 0) + (feePct || 0) * gross;
+
+  if(sellFeeMin != null) fee = Math.max(fee, sellFeeMin);
+  if(sellFeeMax != null) fee = Math.min(fee, sellFeeMax);
+
+  return fee;
+}
+
+  // Preview: net aus brutto bei aktuellem lots-Stand (ohne zu committen)
+  function netFromGross(gross){
+    if(gross <= 0) return 0;
+
+    const fee = sellFee(gross);
+    const proceedsAfterFee = gross - fee; // das bleibt nach Brokergebühr übrig
+
+    const testLots = cloneLots(lots);
+    const { costRemoved, valueRemoved } = fifoRemoveLots(testLots, gross);
+
+    // wenn Portfolio nicht reicht
+    if(valueRemoved < gross - 1e-6) return -Infinity;
+
+    // Steuerlogik: Gebühren mindern den steuerpflichtigen Gewinn
+    const gainPart = Math.max(0, proceedsAfterFee - costRemoved);
+
+    const tax = gainPart * steuerFaktor * taxRate;
+
+    // Netto = nach Gebühr und nach Steuer
+    return proceedsAfterFee - tax;
+  }
+
+  // Solve: brutto so, dass net_nominal erreicht wird
+  function solveGrossForNet(netTargetNominal){
+    // wenn keine Steuer (oder kein Gewinn), brutto ~ netto
+    // wir bisectionieren trotzdem robust
+
+    let low = netTargetNominal;
+    let high = netTargetNominal * 1.6 + 10; // Start
+
+    // high finden, sodass netFromGross(high) >= target
+    for(let g=0; g<40; g++){
+      const n = netFromGross(high);
+      if(n >= netTargetNominal) break;
+      high *= 1.5;
+      if(high > 1e12) return Infinity;
     }
 
-    if(k <= 0 && monthsToZero === null){
-      monthsToZero = m;
-      k = 0;
-      // bei "mit Verzehr" können wir abbrechen, weil danach 0 bleibt
-      if(verzehrArt === "mit") break;
+    for(let i=0; i<40; i++){
+      const mid = (low + high) / 2;
+      const n = netFromGross(mid);
+      if(n < netTargetNominal) low = mid;
+      else high = mid;
+    }
+    return (low + high) / 2;
+  }
+
+  // Für Ergebnis: Kapitalstände  nach X Jahren
+  const snapshots = new Map(); // year -> kapitalReal
+
+  for(let m=1; m<=monthsMax; m++){
+    // 1) Rendite
+    k = k * (1 + rM);
+    lots.forEach(l => { l.value *= (1 + rM); });
+
+    // 2) Sparrate ( konstant -> nominal steigt mit Inflation)
+    const pmtNom = (pmtReal || 0) * inflFactor(m);
+    if(pmtNom > 0){
+      k += pmtNom;
+      lots.push({ cost: pmtNom, value: pmtNom });
+    }
+
+    // 3) Entnahme
+    const isWithdrawMonth = (freq === "monatlich") ? true : (m % 12 === 0);
+    if(isWithdrawMonth){
+      const netNom = (withdrawNetReal || 0) * inflFactor(m);
+
+      // brutto so wählen, dass netto passt (nur Gewinnanteil besteuert)
+      const gross = solveGrossForNet(netNom);
+
+            // Brutto der ersten Entnahme merken (in "heutigen Euro" = 
+      if(firstGrossNominal === null && isFinite(gross) && gross > 0){
+        firstGrossNominal = gross;
+        firstGrossReal = gross / inflFactor(m);
+      }
+  
+
+      if(!isFinite(gross) || gross === Infinity){
+        // nicht lösbar
+        monthsToZero = monthsToZero ?? m;
+        k = 0;
+        lots = [];
+        if(verzehrArt === "mit") break;
+      } else {
+        // commit: aus lots entfernen
+        const { valueRemoved } = fifoRemoveLots(lots, gross);
+        k -= valueRemoved;
+
+        if(k <= 0){
+          monthsToZero = monthsToZero ?? m;
+          k = 0;
+          lots = [];
+          if(verzehrArt === "mit") break;
+        }
+      }
+    }
+
+    // Snapshot am Jahresende speichern 
+    if(m % 12 === 0){
+      const year = m / 12;
+      const kReal = k / inflFactor(m);
+      snapshots.set(year, kReal);
     }
   }
 
   const yearsToZero = monthsToZero === null ? null : (monthsToZero / 12);
 
-  // Hilfswerte aus der Simulation:
-  function capitalAfterYears(Y){
-    const months = Math.round(Y*12);
-    let kk = startKapital;
-    for(let m=1; m<=months; m++){
-      kk = kk * (1 + rM);
-      kk += (monatSparrate || 0);
-      if(freq === "monatlich"){
-        kk -= entnahmeBetrag;
-      } else {
-        if(m % 12 === 0) kk -= entnahmeBetrag;
-      }
-      if(kk <= 0){ kk = 0; break; }
-    }
-    return kk;
-  }
+  const k30 = snapshots.get(30) ?? 0;
+  const k60 = snapshots.get(60) ?? 0;
+  const k0 = startKapitalReal;
 
-    const k30 = capitalAfterYears(30);
-    const k60 = capitalAfterYears(60);          //  neu: damit nachhaltig funktioniert
-    const kTarget = capitalAfterYears(yearsMax);
-
-  const nachhaltig = (k60 >= k0 * 0.999);   
-
-
-  // Benötigtes Kapital für ewige Rente (real) nach Formel:
-  const annualWithdraw = (freq === "monatlich") ? entnahmeBetrag * 12 : entnahmeBetrag;
-  const annualSave = (monatSparrate || 0) * 12;
-
-  let benoetigtesKapital = null;
-  if(rReal > 0){
-    const need = (annualWithdraw - annualSave) / rReal;
-    benoetigtesKapital = Math.max(0, need);
-  }
+  const nachhaltig = (k60 >= k0 * 0.999);
 
   return {
-    rReal,
     yearsToZero,
     k30,
-    k60,             
-    kTarget,
+    k60,
     nachhaltig,
-    benoetigtesKapital
+    firstGrossNominal,
+    firstGrossReal
   };
 }
 
 // --- Modus Auswahl ---
-function selectMode(m, el){
+ function selectMode(m, el){
 
     mode = m;
 
@@ -1085,13 +1269,13 @@ inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach a
     document.getElementById("input-title").innerText="Benötigte Sparrate berechnen";
     container.innerHTML=`
         <input id="pv" type="text"
-inputmode="decimal" placeholder="Startkapital (€)">
+        inputmode="decimal" placeholder="Startkapital (€)">
         <input id="ziel" type="text"
-inputmode="decimal" placeholder="Zielkapital (€)">
+        inputmode="decimal" placeholder="Zielkapital (€)">
         <input id="jahre" type="text" inputmode="numeric"
-placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
+        placeholder="Anlagedauer (Jahre)" oninput="limitYears(this)">
         <input id="zins" type="text"
-inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
+        inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
 
         <hr>
         <h3>Steuerangaben</h3>
@@ -1109,13 +1293,13 @@ if(mode=="ansparzeit"){
     document.getElementById("input-title").innerText="Benötigte Ansparzeit berechnen";
     container.innerHTML=`
         <input id="pv" type="text"
-inputmode="decimal" placeholder="Startkapital (€)">
+        inputmode="decimal" placeholder="Startkapital (€)">
         <input id="pmt" type="text"
-inputmode="decimal" placeholder="Monatliche Sparrate (€)">
+        inputmode="decimal" placeholder="Monatliche Sparrate (€)">
         <input id="ziel" type="text"
-inputmode="decimal" placeholder="Zielkapital (€)">
+        inputmode="decimal" placeholder="Zielkapital (€)">
         <input id="zins" type="text"
-inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
+        inputmode="decimal" placeholder="Jahreszins (%) Optional (ist Vorgegeben, nach aktueller Studienlage)">
 
         <hr>
         <h3>Steuerangaben</h3>
@@ -1135,7 +1319,8 @@ if(mode=="entnahme"){
   document.getElementById("input-title").innerText="Entnahmephase berechnen";
 
   container.innerHTML = `
-    <input id="pv" type="text" inputmode="decimal" placeholder="Kapital (€)">
+    <input id="pv" type="text" class="euro-input" inputmode="decimal" placeholder="Kapital (€)">
+    <input id="start_gewinne" type="text" class="euro-input" inputmode="decimal" placeholder="Gewinne im Kapital (€) optional">
 
     <label>Art des Verzehrs</label>
     <select id="verzehr">
@@ -1148,7 +1333,7 @@ if(mode=="entnahme"){
       <input id="verzehr_jahre" type="text" inputmode="decimal" placeholder="z.B. 25">
     </div>
 
-    <label>Auszahlung (NETTO)</label>
+    <label>Auszahlung (netto)</label>
     <input id="entnahme" type="text" inputmode="decimal" placeholder="Netto-Auszahlung (€)">
 
     <label>Entnahme-Rhythmus</label>
@@ -1157,11 +1342,36 @@ if(mode=="entnahme"){
       <option value="jaehrlich">jährlich</option>
     </select>
 
-    <input id="pmt" type="text" inputmode="decimal" placeholder="Monatliche Sparrate (€) optional">
-    <input id="zins" type="text" inputmode="decimal" placeholder="Jahreszins (%) optional">
-    <input id="inflation" type="text" inputmode="decimal" placeholder="Inflation (%) optional (sonst 2%)">
+    <hr>
+
+   <label>Verkaufsgebühren (optional)</label>
+   <label>Broker auswählen</label> <select id="sell_broker">
+
+    <option value="custom">Benutzerdefiniert</option>
+    <option value="scalable">Scalable Capital</option>
+    <option value="traderepublic">Trade Republic</option>
+    <option value="comdirect">Comdirect</option>
+   </select>
+
+    <input id="sell_fee_fixed" type="text" class="euro-input" inputmode="decimal" placeholder="Grundgebühr pro Verkauf z.B. 1,00(€)">
+
+    <input id="sell_fee_pct" type="text" inputmode="decimal" placeholder="Prozentsatz vom Ordervolumen z.B. 0,25(%)">
+
+        <div style="display:flex; gap:10px; width:100%; margin-top:10px;">
+         <input id="sell_fee_min" type="text" class="euro-input" inputmode="decimal"
+         placeholder="Min (€) z.B. 9,90" style="flex:1;">
+         <input id="sell_fee_max" type="text" class="euro-input" inputmode="decimal"
+         placeholder="Max (€) z.B. 59,90" style="flex:1;">
+        </div> 
 
     <hr>
+  
+     <input id="pmt" type="text" inputmode="decimal" placeholder="Monatliche Sparrate (€) optional">
+     <input id="zins" type="text" inputmode="decimal" placeholder="Jahreszins (%) optional">
+     <input id="inflation" type="text" inputmode="decimal" placeholder="Inflation (%) optional (sonst 2%)">
+
+    
+
 
     <h3>Steuerangaben</h3>
     <label>Kirchensteuer</label>
@@ -1174,6 +1384,7 @@ if(mode=="entnahme"){
 
   // Show/Hide Zeitraum
   setTimeout(()=>initVerzehrYearsToggle(),0);
+  setTimeout(()=>initBrokerFeesUI(),0);
 }
 
 
@@ -1192,7 +1403,7 @@ if(mode=="entnahme_kapital"){
       <input id="verzehr_jahre" type="text" inputmode="decimal" placeholder="z.B. 30">
     </div>
 
-    <label>Gewünschte Auszahlung (NETTO)</label>
+    <label>Gewünschte Auszahlung (netto)</label>
     <input id="entnahme" type="text" inputmode="decimal" placeholder="Netto-Auszahlung (€)">
 
     <label>Entnahme-Rhythmus</label>
@@ -1200,6 +1411,30 @@ if(mode=="entnahme_kapital"){
       <option value="monatlich">monatlich</option>
       <option value="jaehrlich">jährlich</option>
     </select>
+
+      <hr>
+
+       <label>Verkaufsgebühren (optional)</label>
+   <label>Broker auswählen</label> <select id="sell_broker">
+
+    <option value="custom">Benutzerdefiniert</option>
+    <option value="scalable">Scalable Capital</option>
+    <option value="traderepublic">Trade Republic</option>
+    <option value="comdirect">Comdirect</option>
+   </select>
+
+    <input id="sell_fee_fixed" type="text" class="euro-input" inputmode="decimal" placeholder="Grundgebühr pro Verkauf z.B. 1,00(€)">
+
+    <input id="sell_fee_pct" type="text" inputmode="decimal" placeholder="Prozentsatz vom Ordervolumen z.B. 0,25(%)">
+
+        <div style="display:flex; gap:10px; width:100%; margin-top:10px;">
+         <input id="sell_fee_min" type="text" class="euro-input" inputmode="decimal"
+         placeholder="Min (€) z.B. 9,90" style="flex:1;">
+         <input id="sell_fee_max" type="text" class="euro-input" inputmode="decimal"
+         placeholder="Max (€) z.B. 59,90" style="flex:1;">
+        </div> 
+
+    <hr>
 
     <input id="pmt" type="text" inputmode="decimal" placeholder="Monatliche Sparrate (€) optional">
     <input id="zins" type="text" inputmode="decimal" placeholder="Jahreszins (%) optional">
@@ -1217,7 +1452,8 @@ if(mode=="entnahme_kapital"){
   `;
 
   // Show/Hide Zeitraum
-  setTimeout(()=>initVerzehrYearsToggle(),0);
+   setTimeout(()=>initVerzehrYearsToggle(),0);
+   setTimeout(()=>initBrokerFeesUI(),0); 
 }
 
    gotoStep(STEP.INPUT);
@@ -1249,43 +1485,71 @@ function selectStrategy(n, el){
     if(el) el.classList.add("active");
 }
 
+
 function goToStrategy(){
-    if(!mode){
-        alert("Bitte zuerst einen Modus auswählen");
-        return;
+  if(!mode){
+    alert("Bitte zuerst einen Modus auswählen");
+    return;
+  }
+
+  // ✅ Anlagedauer MUSS bei Endkapital & Sparrate vor dem Weiter geprüft werden
+  if(mode === "endkapital" || mode === "sparrate"){
+    const yEl = document.getElementById("jahre");
+
+    // Feld fehlt (sollte nicht passieren, aber sicher ist sicher)
+    if(!yEl){
+      alert("Anlagedauer fehlt");
+      return;
     }
 
+    // leer -> sofort stoppen
+    if(String(yEl.value || "").trim() === ""){
+      alert("Bitte Anlagedauer (Jahre) eintragen.");
+      yEl.focus();
+      return;
+    }
 
-  // ===== CUSTOM STRATEGIE =====
+    // ungültig -> stoppen
+    let y = parseNumberDE(yEl.value);
+    if(!y || y < 1 || y > 100){
+      alert("Bitte gültige Anlagedauer (1–100 Jahre) eingeben.");
+      yEl.focus();
+      return;
+    }
+  }
 
-
-    gotoStep(STEP.STRATEGY);
-
-
+  gotoStep(STEP.STRATEGY);
 }
+
 
 function addCustomETF(){
+  const rawWkn = (document.getElementById("new-wkn").value || "").trim();
+  const wkn = rawWkn || ""; // darf auch leer sein, eid ist die echte ID
 
-    const rawWkn = (document.getElementById("new-wkn").value || "").trim();
-    const wkn = rawWkn ? rawWkn : ("CUSTOM_" + Date.now());
-    const name = document.getElementById("new-name").value || "Eigener ETF";
+  const name = document.getElementById("new-name").value || "Eigener ETF";
 
-    let ter = parseNumberDE(document.getElementById("new-ter").value) / 100;
-    const tf  = parseNumberDE(document.getElementById("new-tf").value) / 100;
+  let ter = parseNumberDE(document.getElementById("new-ter").value) / 100;
+  const tf  = parseNumberDE(document.getElementById("new-tf").value) / 100;
 
-    if(!isFinite(ter) || ter < 0) ter = 0;
-    if(!isFinite(tf)  || tf < 0)  tf  = 0;
-    if(tf > 1) tf = 1;
-    const pos = document.getElementById("new-pos").value || "0";
-   
+  if(!isFinite(ter) || ter < 0) ter = 0;
+  if(!isFinite(tf)  || tf < 0)  tf  = 0;
+  if(tf > 1) tf = 1;
 
-    const newETF = { wkn, name, ter, pos, tf };
+  const pos = document.getElementById("new-pos").value || "0";
 
-    customOnlyETFs.push(newETF);
+  const newETF = {
+    eid: makeEid("CUS"),
+    wkn,
+    name,
+    ter,
+    pos,
+    tf
+  };
 
-
-    buildCustomTable(); // Tabelle neu laden
+  customOnlyETFs.push(newETF);
+  buildCustomTable();
 }
+
 
 // --- ETF Auswahl ---
 
@@ -1358,10 +1622,7 @@ if(mode === "rebalancing"){
 } else {
   btn.style.display = "block";
   btn.innerText = "Berechnen";
-}
-
-    // Hier darf sofort berechnet werden
-    document.getElementById("calc-btn").style.display="block";
+  }
 }
 
 
@@ -1416,7 +1677,7 @@ function berechnen(){
 
 
     // ===== REBALANCING MODUS =====
-if(mode === "rebalancing"){
+ if(mode === "rebalancing"){
 
   // 1) Ziel-ETFs + Zielgewichte holen
   let selectedETFs = [];
@@ -1442,37 +1703,50 @@ if(mode === "rebalancing"){
     selectedETFs.push({...etfData.em3[e],weight:0.3});
     selectedETFs.push({...etfData.variable4[s],weight:0.2});
   }
-  if(strategy==4){
+
+
+    if(strategy==4){
+    // Customize muss fertig sein (Gewichte vorhanden)
     if(!customFinished){
-      alert("Bitte erst Gewichte im Customize fertig eingeben.");
+      alert("Bitte zuerst Customize-Gewichtung abschließen.");
       return;
     }
 
-    const allETFs = [
-      ...etfData.world5, ...etfData.world3, ...etfData.em3, ...etfData.variable4, ...customOnlyETFs
-    ];
-    const checked = document.querySelectorAll('input[name="custom-select"]:checked');
-    if(checked.length !== customCount){ alert("Bitte ETFs auswählen"); return; }
-
     selectedETFs = [];
+
+    const etfByEid = getETFMapByEid();
+    const checked = document.querySelectorAll("#custom-box input[name='custom-select']:checked");
+
+    if(checked.length !== customCount){
+      alert(`Bitte genau ${customCount} ETFs auswählen.`);
+      return;
+    }
+
     let weightError = false;
 
-    checked.forEach((c)=>{
-      const etf = allETFs[c.value];
- const weight = customWeights[c.value];
+    checked.forEach(c=>{
+      const eid = String(c.value || "").trim();
+      const etf = etfByEid[eid];
+      const weight = customWeights[eid];
 
-if(!Number.isFinite(weight) || weight <= 0){
-  weightError = true;
-  return;
-}
+      if(!etf || !Number.isFinite(weight) || weight <= 0){
+        weightError = true;
+        return;
+      }
 
-selectedETFs.push({ ...etf, weight });
+      selectedETFs.push({ ...etf, weight, eid });
     });
 
-    if(weightError){ alert("Fehler: Gewicht fehlt (Customize)."); return; }
+    if(weightError){
+      alert("Fehler: Gewicht fehlt (Customize). Bitte Gewichte erneut eingeben.");
+      return;
+    }
   }
 
-  selectedETFs = selectedETFs.map((e, idx) => ({ ...e, _rbKey: String(idx) }));
+  // _rbKey IMMER setzen (für cur_ IDs)
+  selectedETFs = selectedETFs.map(e => ({ ...e, _rbKey: String(e.eid || e.wkn) }));
+
+
 
   // 2) Sparrate lesen
   const pmt = parseEuro(document.getElementById("rebalance-pmt")?.value);
@@ -1482,10 +1756,10 @@ selectedETFs.push({ ...etf, weight });
   }
 
   // 3) aktuelle Werte lesen
-const current = {};
-let anyMissing = false;
+ const current = {};
+ let anyMissing = false;
 
-selectedETFs.forEach(e=>{
+ selectedETFs.forEach(e=>{
   const el = document.getElementById(`cur_${e._rbKey}`);
   const raw = (el?.value ?? "").trim();
 
@@ -1494,7 +1768,7 @@ selectedETFs.forEach(e=>{
   const v = parseEuro(raw);
   if(!isFinite(v) || v < 0) anyMissing = true;
   current[e._rbKey] = Math.max(0, v);
-});
+ });
 
   if(anyMissing){
     alert("Bitte gültige aktuelle Depotwerte je ETF eingeben.");
@@ -1502,26 +1776,26 @@ selectedETFs.forEach(e=>{
   }
 
   // 4) Rebalancing rechnen (ohne Verkäufe)
-const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0);
-const newTotal = curTotal + pmt;
+ const curTotal = selectedETFs.reduce((s,e)=> s + (current[e._rbKey] || 0), 0); 
+ const newTotal = curTotal + pmt;
 
-//  Optimale Zielbeträge (2 Varianten)
-const targetNow = {};   // Zielbeträge, wenn man "heute" perfekt verteilt wäre
-const targetAfter = {}; // Zielbeträge nach Einzahlung (newTotal)
+ //  Optimale Zielbeträge (2 Varianten)
+ const targetNow = {};   // Zielbeträge, wenn man "heute" perfekt verteilt wäre
+ const targetAfter = {}; // Zielbeträge nach Einzahlung (newTotal)
 
-selectedETFs.forEach(e=>{
+ selectedETFs.forEach(e=>{
   targetNow[e._rbKey]   = curTotal * e.weight;
   targetAfter[e._rbKey] = newTotal * e.weight;
-});
+ }  );
 
-// needs berechnen (nur Untergewichtungen)
-const needs = selectedETFs.map(e=>{
+ // needs berechnen (nur Untergewichtungen)
+ const needs = selectedETFs.map(e=>{
   const cur = current[e._rbKey] || 0;
   const need = Math.max(0, (targetAfter[e._rbKey] || 0) - cur);
   return { _rbKey: e._rbKey, need };
-});
+ } );
 
-const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
+ const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
 
   const buy = {};
   selectedETFs.forEach(e=> buy[e._rbKey] = 0);
@@ -1615,7 +1889,7 @@ const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
   etfBox.innerHTML = "";
 
 
-selectedETFs.forEach(e=>{
+ selectedETFs.forEach(e=>{
   etfBox.innerHTML += `
     <p>
       <strong>${(e.weight*100).toFixed(0)}%</strong> ${e.name}<br>
@@ -1624,30 +1898,51 @@ selectedETFs.forEach(e=>{
       <small>Optimal (nach Sparrate): <b>${euro(targetAfter[e._rbKey] || 0)}</b></small>
     </p>
   `;
-});
+ });
 
   gotoStep(STEP.RESULT);
 
   const chartWrap = document.getElementById("chart-wrap");
   if(chartWrap) chartWrap.style.display = "none";
 
-  return;
-}
+  return; 
+ }
 
 
 
    const PV = parseEuro(document.getElementById("pv")?.value);
-const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
-const ziel = parseEuro(document.getElementById("ziel")?.value);
+   const START_G = parseEuro(document.getElementById("start_gewinne")?.value);
+   const startGewinne = Math.max(0, START_G || 0);
+   const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
+   const ziel = parseEuro(document.getElementById("ziel")?.value);
+   const sellFeeFixed = parseEuro(document.getElementById("sell_fee_fixed")?.value) || 0;
+   const sellFeePct   = (parseNumberDE(document.getElementById("sell_fee_pct")?.value) || 0) / 100;
+   const minEl = document.getElementById("sell_fee_min");
+   const maxEl = document.getElementById("sell_fee_max");
 
-if((mode === "sparrate" || mode === "ansparzeit") && (!ziel || ziel <= 0)){
+   const uiMinRaw = (minEl?.value ?? "").trim();
+   const uiMaxRaw = (maxEl?.value ?? "").trim();
+
+   const uiMin = uiMinRaw === "" ? null : parseEuro(uiMinRaw);
+   const uiMax = uiMaxRaw === "" ? null : parseEuro(uiMaxRaw);
+
+   const sellFeeMin = (uiMin != null && isFinite(uiMin)) ? Math.max(0, uiMin)
+                  : (_sellFeeMin != null ? _sellFeeMin : null);
+
+   const sellFeeMax = (uiMax != null && isFinite(uiMax)) ? Math.max(0, uiMax)
+                  : (_sellFeeMax != null ? _sellFeeMax : null);
+
+   const feeFixed = Math.max(0, sellFeeFixed);
+   const feePct   = Math.min(1, Math.max(0, sellFeePct));       
+
+ if((mode === "sparrate" || mode === "ansparzeit") && (!ziel || ziel <= 0)){
   alert("Bitte gültiges Zielkapital eingeben");
   return;
-}
+ }
 
     let jahre = null;
 
-if(mode === "endkapital" || mode === "sparrate"){
+ if(mode === "endkapital" || mode === "sparrate"){
     const el = document.getElementById("jahre");
     if(!el){
         alert("Anlagedauer fehlt");
@@ -1666,16 +1961,16 @@ if(mode === "endkapital" || mode === "sparrate"){
     const zins  = parseNumberDE(document.getElementById("zins")?.value) / 100;
     const entnahme = parseEuro(document.getElementById("entnahme")?.value);
     function withdrawalNetFactor(kirchensteuer, steuerFaktor){
-  // Steuer nur auf steuerpflichtigen Anteil (nach Teilfreistellung)
-  const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0)); // Abgeltung+Soli+Kirche
-  const effectiveTax = taxRate * (steuerFaktor ?? 1);        // Teilfreistellung wirkt hier
-  return 1 - effectiveTax; // Anteil, der netto beim Nutzer ankommt
+     // Steuer nur auf steuerpflichtigen Anteil (nach Teilfreistellung)
+    const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0)); // Abgeltung+Soli+Kirche
+    const effectiveTax = taxRate * (steuerFaktor ?? 1);        // Teilfreistellung wirkt hier
+    return 1 - effectiveTax; // Anteil, der netto beim Nutzer ankommt
 }
     const entnahmeFreq = document.getElementById("entnahme_freq")?.value || "monatlich";
     const verzehr = document.getElementById("verzehr")?.value || "mit";
     const inflation = (parseNumberDE(document.getElementById("inflation")?.value) || 2) / 100; // default 2% 
     const verzehrJahreInput = parseNumberDE(document.getElementById("verzehr_jahre")?.value);
-const verzehrJahre = (verzehr === "mit" && verzehrJahreInput > 0) ? verzehrJahreInput : null;   
+    const verzehrJahre = (verzehr === "mit" && verzehrJahreInput > 0) ? verzehrJahreInput : null;   
     let kirchensteuer =
     parseFloat(document.getElementById("kirche")?.value) || 0;
 
@@ -1706,78 +2001,75 @@ const verzehrJahre = (verzehr === "mit" && verzehrJahreInput > 0) ? verzehrJahre
         selectedETFs.push({...etfData.variable4[s],weight:0.2});
 
     
-}
+ }
+
 if(strategy == 4){
 
-    selectedETFs = [];
+  if(!customFinished){
+    alert("Bitte zuerst Customize-Gewichtung abschließen.");
+    return;
+  }
 
-   const allETFs = [
-    ...etfData.world5,
-    ...etfData.world3,
-    ...etfData.em3,
-    ...etfData.variable4,
-   ...customOnlyETFs
-];
+  selectedETFs = [];
 
-    const checked =
-        document.querySelectorAll(
-            'input[name="custom-select"]:checked'
-        );
+  const etfByEid = getETFMapByEid();
+  const checked = document.querySelectorAll("#custom-box input[name='custom-select']:checked");
 
-    if(checked.length !== customCount){
-        alert("Bitte ETFs auswählen");
-        return;
+  if(checked.length !== customCount){
+    alert(`Bitte genau ${customCount} ETFs auswählen.`);
+    return;
+  }
+
+  let weightError = false;
+
+  checked.forEach((c)=>{
+    const eid = String(c.value || "").trim();
+    const etf = etfByEid[eid];
+    const weight = customWeights[eid];
+
+    if(!etf || !Number.isFinite(weight) || weight <= 0){
+      weightError = true;
+      return;
     }
 
-let weightError = false;
+    selectedETFs.push({ ...etf, weight, eid });
+  });
 
-checked.forEach((c)=>{
-  const etf = allETFs[c.value];
-const weight = customWeights[c.value];
-if(!Number.isFinite(weight) || weight <= 0){ weightError = true; return; }
-
-  selectedETFs.push({ ...etf, weight });
-});
-
-
-
-
-if (weightError) {
-  alert("Fehler: Gewicht fehlt (Customize). Bitte Gewichte erneut eingeben.");
-  return;
-}
-
+  if(weightError){
+    alert("Fehler: Gewicht fehlt (Customize). Bitte Gewichte erneut eingeben.");
+    return;
+  }
 }
 
 
     
     // Gewichtete Portfolio-TER
-const portfolioTER = selectedETFs.reduce((sum,e)=>sum + e.ter * e.weight, 0);
-
-// ===== GEWICHTETE TEILFREISTELLUNG =====
-const portfolioTF = selectedETFs.reduce(
+ const portfolioTER = selectedETFs.reduce((sum,e)=>sum + e.ter * e.weight, 0);
+ 
+  // ===== GEWICHTETE TEILFREISTELLUNG =====
+ const portfolioTF = selectedETFs.reduce(
     (sum, e) => sum + (e.tf || 0) * e.weight,
     0
-);
+ );
 
-// steuerpflichtiger Anteil
-const steuerFaktor = 1 - portfolioTF;
+  // steuerpflichtiger Anteil
+ const steuerFaktor = 1 - portfolioTF;
 
-// Summe der Einzel-TER (ungewichtet)
-const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
+ // Summe der Einzel-TER (ungewichtet)
+ const sumTER = selectedETFs.reduce((sum,e)=>sum + e.ter, 0);
 
     let rw, ra, rb;
 
-//  Ansparzeit: immer feste Zinssätze 5% / 6% / 8%
-if (mode === "ansparzeit") {
+ //  Ansparzeit: immer feste Zinssätze 5% / 6% / 8%
+ if (mode === "ansparzeit") {
   rw = 0.05;
   ra = 0.06;
   rb = 0.08;
-} else {
+  } else {
   // für alle anderen Modi wie bisher
   const yearsForScenario = (mode === "entnahme" || mode === "entnahme_kapital") ? 30 : jahre;
   [rw, ra, rb] = (zins > 0) ? [zins, zins, zins] : getZinsen(yearsForScenario);
-}
+ }
 
     function calc(r){
         const effektiverZins = Math.max(r - portfolioTER, -0.99);
@@ -1793,7 +2085,7 @@ if (mode === "ansparzeit") {
         }
 
       // --- Sparrate ---
-if(mode === "sparrate"){
+ if(mode === "sparrate"){
 
   const effektiverZins = Math.max(r - portfolioTER, -0.99);
 
@@ -1834,11 +2126,11 @@ if(mode === "sparrate"){
 
   end = berechneFV(PV, PMT, effektiverZins, jahre);
   einzahlungen = PV + PMT * 12 * jahre;
-}
+ }
 
 
         // --- Ansparzeit ---
-if(mode === "ansparzeit"){
+ if(mode === "ansparzeit"){
 
   let low = 0;
   let high = 1;
@@ -1877,73 +2169,112 @@ if(mode === "ansparzeit"){
 
   end = berechneFV(PV, PMT, effektiverZins, dauer);
   einzahlungen = PV + PMT * 12 * dauer;
-}
+ }
 
 
-// ===== TER-Kosten realistisch berechnen =====
+ // ===== TER-Kosten realistisch berechnen =====
 
-// Endwert OHNE TER (gleiche Dauer, gleiche Sparrate)
-let endOhneTER = 0;
+ // Endwert OHNE TER (gleiche Dauer, gleiche Sparrate) 
+ let endOhneTER = 0;
 
-if(mode === "endkapital" || mode === "sparrate"){
+ if(mode === "endkapital" || mode === "sparrate"){
     endOhneTER = berechneFV(PV, PMT, r, jahre);
-}
+  }
 
-if(mode === "ansparzeit"){
+ if(mode === "ansparzeit"){
     // gleiche Dauer wie berechnet, aber OHNE TER
     endOhneTER = berechneFV(PV, PMT, r, dauer);
-}
+ }
 
-// TER-Effekt = Opportunitätsverlust (Rendite-/Endwert-Differenz, keine "Gebühr")
-const terOpportunitaetsverlust = Math.max(0, endOhneTER - end);
+ // TER-Effekt = Opportunitätsverlust (Rendite-/Endwert-Differenz, keine "Gebühr") 
+ const terOpportunitaetsverlust = Math.max(0, endOhneTER - end);
 
-// Gewinn berechnen
-const gewinnBrutto = Math.max(0, end - einzahlungen);
+ // Gewinn berechnen
+ const gewinnBrutto = Math.max(0, end - einzahlungen);
 
-// Teilfreistellung anwenden
-const gewinnSteuerpflichtig = gewinnBrutto * steuerFaktor;
+ // Teilfreistellung anwenden
+ const gewinnSteuerpflichtig = gewinnBrutto * steuerFaktor;
 
-// Abgeltungssteuer
-const abgeltung = gewinnSteuerpflichtig * 0.25;
+ // Abgeltungssteuer
+ const abgeltung = gewinnSteuerpflichtig * 0.25;
 
-// Solidaritätszuschlag (5,5 %)
-const soli = abgeltung * 0.055;
+ // Solidaritätszuschlag (5,5 %)
+ const soli = abgeltung * 0.055;
 
-// Kirchensteuer
-const kirche = abgeltung * kirchensteuer;
+ // Kirchensteuer
+ const kirche = abgeltung * kirchensteuer;
 
-// Gesamtsteuer
-const steuer = abgeltung + soli + kirche;
+ // Gesamtsteuer
+ const steuer = abgeltung + soli + kirche;
 
-const net = end - steuer;
+ const net = end - steuer;
 
-if(mode === "entnahme"){
+ if(mode === "entnahme"){
 
-  // Rendite nach Portfolio-TER (nominal)
+  // nominale Rendite nach TER
   const nominalNetto = Math.max(r - portfolioTER, -0.99);
 
-  //  Eingabe ist NETTO-Auszahlung
-  const desiredNet = entnahme || 0;
+  // gewünschte netto-Auszahlung ist "heutige Euro" (real konstant)
+  const desiredNetReal = entnahme || 0;
 
-  //  Netto -> Depot-Brutto (inkl. Teilfreistellung)
-  const netF = withdrawalNetFactor(kirchensteuer, steuerFaktor);
-  const withdrawFromDepot = (netF > 0) ? (desiredNet / netF) : Infinity;
-
-  // Real-Simulation (inflationsbereinigt) mit BRUTTO-Depotentnahme
-  const sim = simulateEntnahmeReal({
-    startKapital: PV,
-    monatSparrate: PMT_INPUT || 0,
-    entnahmeBetrag: withdrawFromDepot,   // <- wichtig!
+  // 1) Hauptsimulation (für Kapitalverlauf / Dauer etc.) mit gewähltem Rhythmus
+  const sim = simulateEntnahmeNominalFIFO({
+    startKapitalReal: PV,
+    startGewinneReal: startGewinne,
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNetReal,
     freq: entnahmeFreq,
     nominalRendite: nominalNetto,
-    inflation: inflation,
+    inflation,
     yearsMax: (verzehr === "mit" ? (verzehrJahre || 30) : 60),
-    verzehrArt: verzehr
+    verzehrArt: verzehr,
+    steuerFaktor,
+    kirchensteuer,
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
   });
 
-    //  Für die Anzeige immer "Kapital nach 30 Jahren (real)"
-  const horizon = 30;
+  // 2) Zusätzlich: Brutto-Bedarf separat für monatlich + jährlich (1 Jahr reicht)
+  const simGrossMonthly = simulateEntnahmeNominalFIFO({
+    startKapitalReal: PV,
+    startGewinneReal: startGewinne, 
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNetReal,
+    freq: "monatlich",
+    nominalRendite: nominalNetto,
+    inflation,
+    yearsMax: 1,
+    verzehrArt: "mit",
+    steuerFaktor,
+    kirchensteuer,
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
+  });
+
+  const simGrossYearly = simulateEntnahmeNominalFIFO({
+    startKapitalReal: PV,
+    startGewinneReal: startGewinne,
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNetReal,
+    freq: "jaehrlich",
+    nominalRendite: nominalNetto,
+    inflation,
+    yearsMax: 1,
+    verzehrArt: "mit",
+    steuerFaktor,
+    kirchensteuer,
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
+  });
+
   const endRealH = sim.k30;
+  const rReal = realRateFromNominal(nominalNetto, inflation);
 
   return {
     end: endRealH,
@@ -1952,118 +2283,127 @@ if(mode === "entnahme"){
     net: endRealH,
     dauer: sim.yearsToZero,
     PMT: PMT_INPUT,
-    rReal: sim.rReal,
     k30: sim.k30,
     nachhaltig: sim.nachhaltig,
-    benoetigtesKapital: sim.benoetigtesKapital,
     horizonYears: 30,
+    desiredNet: desiredNetReal,
+    rReal,
 
-    // Zusatz für UI:
-    desiredNet,
-    withdrawFromDepot
+    // NEU: brutto-bedarf in "heutigen Euro"
+    grossMonthlyReal: simGrossMonthly.firstGrossReal ?? null,
+    grossYearlyReal: simGrossYearly.firstGrossReal ?? null,
   };
-}
+ }
 
-// --- Kapital für Entnahmephase (NETTO-Auszahlung) ---
-if(mode === "entnahme_kapital"){
+ // --- Kapital für Entnahmephase (netto-Auszahlung) ---
+ if(mode === "entnahme_kapital"){
 
-  // Rendite nach Portfolio-TER (nominal)
   const nominalNetto = Math.max(r - portfolioTER, -0.99);
-
-  // Realzins
   const rReal = realRateFromNominal(nominalNetto, inflation);
-
-  // Nutzerwunsch = NETTO Auszahlung
   const desiredNet = entnahme || 0;
 
-  // Steuer-Faktor => wie viel vom Depot muss brutto entnommen werden
-  const netF = withdrawalNetFactor(kirchensteuer, steuerFaktor);
-
-  // Wenn netF <= 0 wäre mathematisch kaputt (kommt praktisch nicht vor)
-  const withdrawFromDepot = (netF > 0) ? (desiredNet / netF) : Infinity;
-
-  // entnahmeBetrag, der wirklich das Depot verlässt (real konstant)
-  const entnahmeDepotBetrag = withdrawFromDepot;
-
-  // Zielkriterium:
-  // - "mit": soll 30 Jahre durchhalten (Kapital darf am Ende auch 0 sein, aber nicht vorher)
-  // - "ohne": ewige Rente (Kapitalverzehr vermeiden) -> Formel + optional Simulation-Check
   const yearsTarget = (verzehr === "mit") ? (verzehrJahre || 30) : 60;
 
-  function survivesYears(K, Y){
-    const sim = simulateEntnahmeReal({
-      startKapital: K,
-      monatSparrate: PMT_INPUT || 0,
-      entnahmeBetrag: entnahmeDepotBetrag,
-      freq: entnahmeFreq,
-      nominalRendite: nominalNetto,
-      inflation: inflation,
-      yearsMax: Y,
-      verzehrArt: "mit"
-    });
-    // null => nicht auf 0 innerhalb Y
-    return sim.yearsToZero === null;
-  }
+ function criterion(K, steuerFaktorParam){
+  const sim = simulateEntnahmeNominalFIFO({
+    startKapitalReal: K,
+    startGewinneReal: 0,
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNet,
+    freq: entnahmeFreq,
+    nominalRendite: nominalNetto,
+    inflation,
+    yearsMax: yearsTarget,
+    verzehrArt: (verzehr === "mit" ? "mit" : "ohne"),
 
-  // Wenn Sparrate alleine schon reicht:
-  if(survivesYears(0, yearsTarget)){
+    steuerFaktor: steuerFaktorParam,
+    kirchensteuer,
+
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
+  });
+
+  if(verzehr === "mit"){
+    return sim.yearsToZero === null;
+  } else {
+    return (sim.yearsToZero === null) && (sim.nachhaltig === true);
+  }
+}
+
+  if(criterion(0, steuerFaktor)){
     return {
-      end: 0,
-      kosten: 0,
-      steuer: 0,
-      net: 0,
-      dauer: 0,
-      PMT: PMT_INPUT,
+      end: 0, kosten: 0, steuer: 0, net: 0, dauer: 0, PMT: PMT_INPUT,
       rReal,
       requiredKapital: 0,
       desiredNet,
-      withdrawFromDepot
+      grossMonthlyReal: null,
+      grossYearlyReal: null
     };
   }
 
-  // Upper bound suchen
   let low = 0;
-  let high = Math.max(10_000, withdrawFromDepot * 12); // Startwert
+  const paymentsPerYear = (entnahmeFreq === "monatlich") ? 12 : 1;
+  let high = Math.max(10_000, desiredNet * paymentsPerYear * 50);
 
   for(let guard=0; guard<80; guard++){
-    if(survivesYears(high, yearsTarget)) break;
+    if(criterion(high, steuerFaktor)) break;
     high *= 2;
-    if(high > 1e10) { // Schutz
+    if(high > 1e10){
       return {
         end: 0, kosten:0, steuer:0, net:0, dauer:0, PMT: PMT_INPUT,
         rReal,
         requiredKapital: Infinity,
         desiredNet,
-        withdrawFromDepot
+        grossMonthlyReal: null,
+        grossYearlyReal: null
       };
     }
   }
 
-  // Bisection
   for(let i=0; i<80; i++){
     const mid = (low + high) / 2;
-    if(survivesYears(mid, yearsTarget)) high = mid;
+    if(criterion(mid, steuerFaktor)) high = mid;
     else low = mid;
   }
 
-  let required = (low + high) / 2;
+  const required = (low + high) / 2;
 
-  // Für "ohne" (ewig) kannst du zusätzlich die "Formel-Variante" anzeigen:
-  // Kapital >= (JahresentnahmeDepot - JahresSparen) / rReal
-  // (Aber nur wenn rReal > 0)
-  if(verzehr === "ohne"){
-    const annualWithdrawDepot = (entnahmeFreq === "monatlich") ? entnahmeDepotBetrag * 12 : entnahmeDepotBetrag;
-    const annualSave = (PMT_INPUT || 0) * 12;
+  // NEU: Brutto-Bedarf separat für monatlich + jährlich (mit dem gefundenen Kapital)
+  const simGrossMonthly = simulateEntnahmeNominalFIFO({
+    startKapitalReal: required,
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNet,
+    freq: "monatlich",
+    nominalRendite: nominalNetto,
+    inflation,
+    yearsMax: 1,
+    verzehrArt: "mit",
+    steuerFaktor,
+    kirchensteuer,
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
+  });
 
-    if(rReal > 0){
-      const formulaNeed = Math.max(0, (annualWithdrawDepot - annualSave) / rReal);
-      // Wir nehmen das Maximum aus Simulation (60J) und Formel (ewig)
-      required = Math.max(required, formulaNeed);
-    } else {
-      // real <= 0 => "ewig" geht praktisch nur, wenn Sparrate >= Entnahme aus Depot
-      required = Infinity;
-    }
-  }
+  const simGrossYearly = simulateEntnahmeNominalFIFO({
+    startKapitalReal: required,
+    pmtReal: PMT_INPUT || 0,
+    withdrawNetReal: desiredNet,
+    freq: "jaehrlich",
+    nominalRendite: nominalNetto,
+    inflation,
+    yearsMax: 1,
+    verzehrArt: "mit",
+    steuerFaktor,
+    kirchensteuer,
+    sellFeeFixed: feeFixed,
+    sellFeePct: feePct,
+    sellFeeMin,
+    sellFeeMax
+  });
 
   return {
     end: 0,
@@ -2075,7 +2415,15 @@ if(mode === "entnahme_kapital"){
     rReal,
     requiredKapital: required,
     desiredNet,
-    withdrawFromDepot
+
+    grossMonthlyReal: simGrossMonthly.firstGrossReal ?? null,
+    grossYearlyReal: simGrossYearly.firstGrossReal ?? null,
+
+    grossFirstReal: (entnahmeFreq === "monatlich"
+  ? (simGrossMonthly.firstGrossReal ?? null)
+  : (simGrossYearly.firstGrossReal ?? null)
+    ),
+    
   };
 }
 
@@ -2089,10 +2437,10 @@ if(mode === "entnahme_kapital"){
     gotoStep(STEP.RESULT);
 
     // ===== CHART NUR IM ENDKAPITAL-MODUS =====
-const chartWrap = document.getElementById("chart-wrap");
-if(chartWrap) chartWrap.style.display = "none";
+   const chartWrap = document.getElementById("chart-wrap");
+    if(chartWrap) chartWrap.style.display = "none";
 
-if(mode === "endkapital"){
+    if(mode === "endkapital"){
   // Durchschnitts-Szenario: 
   const effektivZinsAvg = Math.max(ra - portfolioTER, -0.99);
 
@@ -2102,7 +2450,7 @@ if(mode === "endkapital"){
   if(!Number.isFinite(yearsInt)) yearsInt = 1;
   yearsInt = Math.min(100, Math.max(1, yearsInt));
 
-const netSeries = buildYearSeriesNetto(
+  const netSeries = buildYearSeriesNetto(
   PV,
   PMT_INPUT,
   effektivZinsAvg,
@@ -2111,12 +2459,22 @@ const netSeries = buildYearSeriesNetto(
   kirchensteuer
 );
 
+const taxSeries = buildYearSeriesTaxCum(
+  PV,
+  PMT_INPUT,
+  effektivZinsAvg,
+  yearsInt,
+  steuerFaktor,
+  kirchensteuer
+);
+
+
 //  Brutto (ohne Steuerabzug) – für "echten Zins" im Tooltip
 const grossSeries = buildYearSeriesEndkapital(PV, PMT_INPUT, effektivZinsAvg, yearsInt);
 
 const investedSeries = buildYearSeriesInvested(PV, PMT_INPUT, yearsInt);
 
-// Zinszuwachs (NETTO gesamt) = Netto - Investiert
+// Zinszuwachs (netto gesamt) = Netto - Investiert
 const interestSeries = netSeries.map((v,i)=> v - investedSeries[i]);
 
 const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
@@ -2124,7 +2482,7 @@ const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
 if(chartWrap){
   chartWrap.style.display = "block";
   const canvas = document.getElementById("avgChart");
-  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries, PV, grossSeries);
+  renderStackedBarChart(canvas, labels, investedSeries, interestSeries, netSeries, PV, grossSeries, taxSeries);
 }
 
 
@@ -2150,33 +2508,33 @@ if(mode === "entnahme"){
     return (x === null || x === undefined) ? "∞" : x.toFixed(2);
   }
 
- const entnahmeLabel = (entnahmeFreq === "monatlich") ? "Netto monatlich" : "Netto jährlich";
+const freqTxt = (entnahmeFreq === "monatlich") ? "monatlich" : "jährlich";
 
 vergleichHTML = `
-  <tr><td>Gewünschte Auszahlung (NETTO, real)</td>
-    <td>${euro(entnahme)} (${entnahmeLabel})</td>
-    <td>${euro(entnahme)} (${entnahmeLabel})</td>
-    <td>${euro(entnahme)} (${entnahmeLabel})</td>
+  <tr><td>Gewünschte Auszahlung (netto), ${freqTxt}, </td>
+    <td>${euro(entnahme)}</td>
+    <td>${euro(entnahme)}</td>
+    <td>${euro(entnahme)}</td>
   </tr>
 
-  <tr><td>Entnahme aus Depot (BRUTTO, real)</td>
-    <td>${euro(w.withdrawFromDepot)} / ${entnahmeFreq}</td>
-    <td>${euro(a.withdrawFromDepot)} / ${entnahmeFreq}</td>
-    <td>${euro(b.withdrawFromDepot)} / ${entnahmeFreq}</td>
+    <tr><td>Benötigte Auszahlung (brutto, ${freqTxt})</td>
+    <td>${euro(entnahmeFreq === "monatlich" ? (w.grossMonthlyReal ?? 0) : (w.grossYearlyReal ?? 0))}</td>
+    <td>${euro(entnahmeFreq === "monatlich" ? (a.grossMonthlyReal ?? 0) : (a.grossYearlyReal ?? 0))}</td>
+    <td>${euro(entnahmeFreq === "monatlich" ? (b.grossMonthlyReal ?? 0) : (b.grossYearlyReal ?? 0))}</td>
   </tr>
-    <tr><td>Realzins (nach TER)</td>
-      <td>${(w.rReal*100).toFixed(2)}%</td>
-      <td>${(a.rReal*100).toFixed(2)}%</td>
-      <td>${(b.rReal*100).toFixed(2)}%</td>
-    </tr>
 
-      <tr><td>Kapital nach 30 Jahren (real)</td>
-      <td>${euro(w.end)}</td>
-      <td>${euro(a.end)}</td>
-      <td>${euro(b.end)}</td>
-    </tr>
+  <tr><td>Realzins (nach TER)</td>
+    <td>${(w.rReal*100).toFixed(2)}%</td>
+    <td>${(a.rReal*100).toFixed(2)}%</td>
+    <td>${(b.rReal*100).toFixed(2)}%</td>
+  </tr>
 
-  `;
+  <tr><td>Kapital nach 30 Jahren </td>
+    <td>${euro(w.end)}</td>
+    <td>${euro(a.end)}</td>
+    <td>${euro(b.end)}</td>
+  </tr>
+`;
 
   if(verzehr === "mit"){
     vergleichHTML += `
@@ -2198,15 +2556,8 @@ vergleichHTML = `
         <th>${yesNo(b.nachhaltig)}</th>
       </tr>
 
-      <tr><td>Benötigtes Kapital (ewig, real)</td>
-        <td>${euroOrNA(w.benoetigtesKapital)}</td>
-        <td>${euroOrNA(a.benoetigtesKapital)}</td>
-        <td>${euroOrNA(b.benoetigtesKapital)}</td>
-      </tr>
     `;
   }
-
-  
 
 }
 else if(mode==="ansparzeit"){
@@ -2235,34 +2586,34 @@ else if(mode === "entnahme_kapital"){
     return euro(x);
   }
 
-  const entnahmeLabel = (entnahmeFreq === "monatlich") ? "Netto monatlich" : "Netto jährlich";
-  const artTxt = (verzehr === "mit") ? "30 Jahre (mit Verzehr)" : "Ewig (ohne Verzehr)";
+const freqTxt = (entnahmeFreq === "monatlich") ? "monatlich" : "jährlich";
+const artTxt = (verzehr === "mit") ? "30 Jahre (mit Verzehr)" : "Ewig (ohne Verzehr)";
 
-  vergleichHTML = `
-    <tr><td>Gewünschte Auszahlung</td>
-      <td>${euro(entnahme)} (${entnahmeLabel})</td>
-      <td>${euro(entnahme)} (${entnahmeLabel})</td>
-      <td>${euro(entnahme)} (${entnahmeLabel})</td>
-    </tr>
+vergleichHTML = `
+  <tr><td>Gewünschte Auszahlung (netto), ${freqTxt}, </td>
+    <td>${euro(entnahme)}</td>
+    <td>${euro(entnahme)}</td>
+    <td>${euro(entnahme)}</td>
+  </tr>
 
-    <tr><td>Entnahme aus Depot (brutto, ca.)</td>
-      <td>${euro(w.withdrawFromDepot)} / ${entnahmeFreq}</td>
-      <td>${euro(a.withdrawFromDepot)} / ${entnahmeFreq}</td>
-      <td>${euro(b.withdrawFromDepot)} / ${entnahmeFreq}</td>
-    </tr>
+  <tr><td>Benötigte Auszahlung (brutto, ${freqTxt}, </td>
+    <td>${euro(w.grossFirstReal ?? 0)}</td>
+    <td>${euro(a.grossFirstReal ?? 0)}</td>
+    <td>${euro(b.grossFirstReal ?? 0)}</td>
+  </tr>
 
-    <tr><td>Realzins (nach TER)</td>
-      <td>${(w.rReal*100).toFixed(2)}%</td>
-      <td>${(a.rReal*100).toFixed(2)}%</td>
-      <td>${(b.rReal*100).toFixed(2)}%</td>
-    </tr>
+  <tr><td>Realzins (nach TER)</td>
+    <td>${(w.rReal*100).toFixed(2)}%</td>
+    <td>${(a.rReal*100).toFixed(2)}%</td>
+    <td>${(b.rReal*100).toFixed(2)}%</td>
+  </tr>
 
-    <tr><th>Benötigtes Kapital (${artTxt})</th>
-      <th>${euroOrInf(w.requiredKapital)}</th>
-      <th>${euroOrInf(a.requiredKapital)}</th>
-      <th>${euroOrInf(b.requiredKapital)}</th>
-    </tr>
-  `;
+  <tr><th>Benötigtes Kapital (${artTxt})</th>
+    <th>${euroOrInf(w.requiredKapital)}</th>
+    <th>${euroOrInf(a.requiredKapital)}</th>
+    <th>${euroOrInf(b.requiredKapital)}</th>
+  </tr>
+`;
 }
 
 
@@ -2318,29 +2669,36 @@ if(mode === "endkapital") {
     p.id = "endkapital-text";
     p.innerHTML = `
         <p style="margin-top:20px; font-style:italic;">
-        Wichtig zu beachten<br>
-        Jährliche Vorabpauschale ca. 20€ pro 10.000 € (wird vom Verrechnungskonto abgezogen);<br>
-        Jährlicher Freibetrag von 1.000€/ 2.000€ bei Verheirateten (muss eingestellt werden)
+         Wichtig zu beachten<br>
+        Jährliche Vorabpauschale ca. 20€ pro 10.000 € (wird vom Verrechnungskonto abgezogen)<br>
+        Jährlicher Freibetrag von 1.000€/ 2.000€ bei Verheirateten (muss eingestellt werden) <br>
+        (Chart-Modell): Steuer wird im Chart erst beim Endverkauf berücksichtigt (Buy&Hold, keine Vorabpauschale)
         </p>`;
     extraTextContainer.appendChild(p);
 }
 
 
 // --- Eingaben anzeigen ---
-// --- Eingaben anzeigen inklusive investiertes Kapital ---
+// --- Eingaben anzeigen inklusive investiertes Kapital --- 
 let infoHTML = `<p><strong>Modus:</strong> ${mode}</p>`;
 
 if(mode === "entnahme"){
   const entnahmeTxt = (entnahmeFreq === "monatlich") ? "monatlich" : "jährlich";
   const verzehrTxt = (verzehr === "mit") ? "Mit Kapitalverzehr" : "Ohne Kapitalverzehr (ewige Rente)";
-  infoHTML += `
-    <p><strong>Kapital:</strong> ${euro(PV)}</p>
+  const freqTxt2 = (entnahmeFreq === "monatlich") ? "monatlich" : "jährlich";
+  const grossAvg = (entnahmeFreq === "monatlich") ? (a.grossMonthlyReal ?? 0) : (a.grossYearlyReal ?? 0);
+
+   infoHTML += `
+    <p><strong>Eingezahlt (Kapital):</strong> ${euro(PV)}</p>
+    ${startGewinne > 0 ? `<p><strong>Start-Gewinne:</strong> ${euro(startGewinne)}</p>
+    <p><strong>Depotwert Start (gesamt):</strong> ${euro(PV + startGewinne)}</p>` : `<p><strong>Depotwert Start (gesamt):</strong> ${euro(PV)}</p>`}
     <p><strong>Art:</strong> ${verzehrTxt}</p>
-    <p><strong>Auszahlung (NETTO):</strong> ${euro(entnahme)} (${entnahmeTxt})</p>
-    <p><strong>Entnahme aus Depot (BRUTTO):</strong> ${euro(a.withdrawFromDepot)} / ${entnahmeTxt}</p>
+    <p><strong>Auszahlung (netto, ${entnahmeTxt}):</strong> ${euro(entnahme)}</p>
+    <p><strong>Brutto nötig (${freqTxt2}, Ø):</strong> ${euro(grossAvg)}</p>
     <p><strong>Sparrate:</strong> ${euro(PMT_INPUT || 0)} / Monat</p>
     <p><strong>Inflation:</strong> ${(inflation*100).toFixed(2)}%</p>
   `;
+
   if(zins > 0){
     infoHTML += `<p><strong>Zins (manuell):</strong> ${(zins*100).toFixed(2)}%</p>`;
   }
@@ -2424,8 +2782,9 @@ const sumTERPercent = (sumTER * 100).toFixed(2);
 
 // Aktienanzahl korrekt summieren
 let totalStocks = selectedETFs.reduce((sum, e)=>{
-    const stocks = parseInt(e.pos.replace(/\./g, ""));
-    return sum + stocks;
+  const raw = String(e.pos ?? "").trim();
+  const n = parseInt(raw.replace(/[^\d]/g,""), 10);
+  return sum + (Number.isFinite(n) ? n : 0);
 }, 0);
 
 // Anzeige unter ALLEN ETFs
@@ -2565,36 +2924,27 @@ function customStep1(){
   if(!customCount || customCount < 1 || customCount > 100){
   alert("Bitte gültige Anzahl eingeben");
   return;
-}
-
-//  Max nach verfügbaren ETFs begrenzen (inkl. customOnlyETFs)
-const allETFs = [
-  ...etfData.world5,
-  ...etfData.world3,
-  ...etfData.em3,
-  ...etfData.variable4,
-  ...customOnlyETFs
-];
-
-const maxAvail = allETFs.length;
-
-if(customCount > maxAvail){
+ }
+ 
+  const maxAvail = getAllETFsUnique().length;
+ 
+ if(customCount > maxAvail){
   alert(`Du kannst maximal ${maxAvail} ETFs auswählen (so viele sind aktuell verfügbar).`);
   return;
-}
+ }
 
     document.getElementById("custom-step1").style.display="none";
     document.getElementById("custom-step2").style.display="block";
 
     buildCustomTable();
+ 
+
+ }
 
 
-}
 
-
-
-// ===== STEP 2 — AUSWAHL PRÜFEN =====
-function customStep2(){
+ // ===== STEP 2 — AUSWAHL PRÜFEN =====
+ function customStep2(){
 
     const selected =
         document.querySelectorAll(
@@ -2620,12 +2970,13 @@ function customStep2(){
 const tds = row.querySelectorAll("td");
 const wkn = (tds[1]?.innerText || "").trim();
 const name = (tds[2]?.innerText || "").trim();
-const key = c.value;
+const key = String(c.value || "").trim(); // WKN als stabiler Key
 
 container.innerHTML += `
   <label>${name} Gewicht (%)</label>
   <input type="text"
          inputmode="decimal"
+         placeholder="z.B. 50"
          data-key="${key}">
 `;
 });
@@ -2707,6 +3058,55 @@ function parseEuro(str){
   ) || 0;
 }
 
+// ===== BROKER FEE PRESETS (optional) =====
+// Werte sind Beispiele/Defaults — du kannst sie jederzeit ändern.
+const BROKER_FEES = {
+  custom:       { fixed: "",    pct: "",    min: "",    max: "" },
+  scalable:     { fixed: "0,99", pct: "0",   min: "",    max: "" },
+  traderepublic:{ fixed: "0,99", pct: "0",   min: "",    max: "" },
+  comdirect:    { fixed: "4,90", pct: "0,25", min: "9,90", max: "59,90" }
+};
+
+let _sellFeeMin = null;
+let _sellFeeMax = null;
+
+function initBrokerFeesUI(){
+ const sel = document.getElementById("sell_broker");
+ const fixedEl = document.getElementById("sell_fee_fixed");
+ const pctEl = document.getElementById("sell_fee_pct");
+ const minEl = document.getElementById("sell_fee_min");
+ const maxEl = document.getElementById("sell_fee_max");
+  if(!sel || !fixedEl || !pctEl) return;
+
+
+
+function applyPreset(){
+  const key = sel.value || "custom";
+  const preset = BROKER_FEES[key] || BROKER_FEES.custom;
+
+  // vorbelegen (User kann danach ändern)
+  fixedEl.value = preset.fixed;
+  pctEl.value   = preset.pct;
+
+  if(minEl) minEl.value = preset.min;
+  if(maxEl) maxEl.value = preset.max;
+
+  // Fallback-Variablen passend setzen (numerisch!)
+  _sellFeeMin = preset.min ? parseEuro(preset.min) : null;
+  _sellFeeMax = preset.max ? parseEuro(preset.max) : null;
+
+  // Live-Formatter triggern
+  fixedEl.dispatchEvent(new Event("input", { bubbles:true }));
+  pctEl.dispatchEvent(new Event("input", { bubbles:true }));
+  minEl?.dispatchEvent(new Event("input", { bubbles:true }));
+  maxEl?.dispatchEvent(new Event("input", { bubbles:true }));
+}
+  
+
+  sel.onchange = applyPreset;
+  applyPreset();
+}
+
 function limitYears(el){
   if(!el) return;
   let v = parseInt(String(el.value).replace(/[^\d]/g,""), 10);
@@ -2742,7 +3142,7 @@ function formatEuroInput(el){
 // ===== EURO-EINGABE FORMATIERUNG (LIVE mit Tausenderpunkten) =====
 
 // Welche Felder sollen live formatiert werden?
-const EURO_FIELDS = "#pv, #pmt, #ziel, #entnahme, .euro-input";
+const EURO_FIELDS = "#pv, #pmt, #ziel, #entnahme, #start_gewinne, .euro-input";
 const PERCENT_FIELDS = "#zins, #inflation, #new-ter, #new-tf";
 const YEARS_FIELDS = "#verzehr_jahre";
 
@@ -2811,6 +3211,7 @@ document.addEventListener("input", (e)=>{
   if (e.target.matches(YEARS_FIELDS)) return formatNumberDELive(e.target, 2);
 });
 
+
 // Optional: beim Fokusverlust nochmal sauber lassen (eigentlich nicht nötig, aber okay)
 document.addEventListener("blur", (e)=>{
   if(!e.target.matches(EURO_FIELDS)) return;
@@ -2822,15 +3223,31 @@ document.addEventListener("blur", (e)=>{
   e.target.value = n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }, true);
 
+function getAllETFsUnique(){
+  // WICHTIG: NICHT nach WKN deduplizieren – wir erlauben doppelte WKN
+  ensureEids();
+
+  return [
+    ...etfData.world5,
+    ...etfData.world3,
+    ...etfData.em3,
+    ...etfData.variable4,
+    ...customOnlyETFs
+  ];
+}
+
+function getETFMapByWkn(){
+  const m = Object.create(null);
+  getAllETFsUnique().forEach(e=>{
+    m[String(e.wkn).trim()] = e;
+  });
+  return m;
+}
+
+
 function buildCustomTable(){
 
-    const allETFs = [
-        ...etfData.world5,
-        ...etfData.world3,
-        ...etfData.em3,
-        ...etfData.variable4,
-        ...customOnlyETFs
-    ];
+   const allETFs = getAllETFsUnique();
 
     const container = document.getElementById("custom-table");
 
@@ -2852,9 +3269,7 @@ function buildCustomTable(){
         html += `
         <tr class="etf-row">
             <td>
-              <input type="checkbox"
-                     name="custom-select"
-                     value="${i}">
+              <input  type="checkbox" name="custom-select" value="${e.eid}">
             </td>
             <td>${e.wkn}</td>
             <td>${e.name}</td>
@@ -2890,33 +3305,67 @@ function buildYearSeriesEndkapital(PV, PMT, effektivZins, jahre){
   return series;
 }
 
-// Netto-Reihe (Steuer am Jahresende auf Gewinn)
+
+// Netto-Reihe (Buy&Hold): Steuer erst im LETZTEN Jahr (Endverkauf)
 function buildYearSeriesNetto(PV, PMT, effektivZins, jahre, steuerFaktor, kirchensteuer){
   const series = [];
   const monatszins = effektivZins / 12;
   let value = PV;
 
-  // gleicher Steuersatz wie im Ergebnis
   const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0));
 
   for(let y=1; y<=jahre; y++){
-    // erst Brutto-Depotwert bis Jahresende aufbauen
+    // Brutto bis Jahresende
     for(let m=1; m<=12; m++){
       value = value * (1 + monatszins) + PMT;
     }
 
-    // dann: Netto, falls Verkauf genau am Ende von Jahr y
+    // Buy&Hold: bis zum letzten Jahr KEINE Steuerzahlung
+    if(y < jahre){
+      series.push(value);           // Netto = Brutto (unrealisiert)
+      continue;
+    }
+
+    // Endverkauf im letzten Jahr
     const einzahlungen = PV + PMT * 12 * y;
     const gewinnBrutto = Math.max(0, value - einzahlungen);
-
     const steuer = gewinnBrutto * steuerFaktor * taxRate;
-    const net = value - steuer;
 
-    series.push(net);
+    series.push(value - steuer);
   }
 
   return series;
 }
+
+// Kumulierte Steuer (Buy&Hold): 0 bis zum letzten Jahr, dann gesamte Steuer
+function buildYearSeriesTaxCum(PV, PMT, effektivZins, jahre, steuerFaktor, kirchensteuer){
+  const series = [];
+  const monatszins = effektivZins / 12;
+  let value = PV;
+
+  const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0));
+
+  for(let y=1; y<=jahre; y++){
+    for(let m=1; m<=12; m++){
+      value = value * (1 + monatszins) + PMT;
+    }
+
+    if(y < jahre){
+      series.push(0); // bis Endverkauf: keine Steuer im Jahr
+      continue;
+    }
+
+    const einzahlungen = PV + PMT * 12 * y;
+    const gewinnBrutto = Math.max(0, value - einzahlungen);
+    const steuerEnde = gewinnBrutto * steuerFaktor * taxRate;
+
+    series.push(steuerEnde);
+  }
+
+  return series;
+}
+
+
 
 // Einzahlungen (investiertes Kapital) bis Ende jedes Jahres
 function buildYearSeriesInvested(PV, PMT, jahre){
@@ -2931,7 +3380,7 @@ function formatEUR(x){
   return x.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
 }
 
-function renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross){
+function renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross, taxCum){
   if(!canvas) return;
 
   const ctx = canvas.getContext("2d");
@@ -3097,7 +3546,7 @@ for(let j=0; j<n; j++){
  // Balkendiagramm
 
   // in global payload speichern (für Resize + Hover)
-  _lastChartPayload = { labels, invested, interest, net, gross, bars, basePV };
+  _lastChartPayload = { labels, invested, interest, net, gross, taxCum, bars, basePV };
 
   // Tooltip-Helfer
   function hideTip(){
@@ -3121,17 +3570,19 @@ function showTipByBar(idx){
   const netDeltaYear = totalNet - prevNet;
   const invDeltaYear = invCum - prevInv;
 
-  //  Netto-"Zins im Jahr" (enthält Steuer-Effekt, weil Netto-Deltas)
-  const intYearNet = (idx === 0) ? intCum : (netDeltaYear - invDeltaYear);
-
-  //  Echter Zins im Jahr (BRUTTO, vor Steuer) aus Brutto-Serie
-  const grossTot = gross?.[idx] ?? (invCum + intCum); // Fallback
+  const grossTot = gross?.[idx] ?? (invCum + intCum); 
   const prevGross = (idx > 0) ? (gross?.[idx-1] ?? basePV) : (basePV || 0);
   const grossDeltaYear = grossTot - prevGross;
   const intYearGross = grossDeltaYear - invDeltaYear;
 
-  // Steuer-/Netto-Effekt im Jahr (meist negativ)
-  const taxEffectYear = intYearNet - intYearGross;
+// Kumulierte Steuerlast (Verkauf am Jahresende) + Steuer im Jahr als Differenz
+const taxCumNow = taxCum?.[idx] ?? 0;
+const taxCumPrev = (idx > 0) ? (taxCum?.[idx-1] ?? 0) : 0;
+const taxYear = taxCumNow - taxCumPrev;
+
+// Netto-Zins im Jahr (nach Steuerlast-Änderung, in deinem Modell)
+const intYearNet = intYearGross - taxYear;
+
 
   tooltip.innerHTML = `
     <div style="font-weight:700; margin-bottom:6px;">Jahr ${year}</div>
@@ -3151,10 +3602,15 @@ function showTipByBar(idx){
       <span><b>${formatEUR(intYearGross)}</b></span>
     </div>
 
-    <div class="row">
-      <span><span class="dot" style="background:#999; opacity:.55;"></span>Steuer-/Netto-Effekt (im Jahr)</span>
-      <span><b>${formatEUR(taxEffectYear)}</b></span>
-    </div>
+     <div class="row">
+        <span><span class="dot" style="background:#999; opacity:.55;"></span>Steuer (im Jahr, nur Endverkauf)</span>
+        <span><b>${formatEUR(taxYear)}</b></span>
+     </div>
+
+      <div class="row">
+        <span><span class="dot" style="background:#2196F3; opacity:.35;"></span>Zinszuwachs (im Jahr, netto)</span>
+        <span><b>${formatEUR(intYearNet)}</b></span>
+      </div>
 
     <div class="row" style="margin-top:6px; padding-top:6px; border-top:1px solid #eee;">
       <span>Netto gesamt</span>
@@ -3210,13 +3666,14 @@ function showTipByBar(idx){
   };
 }
 
-// Responsive: bei Resize neu zeichnen (letzte Daten merken)
-let _lastChartPayload = null;
+
 window.addEventListener("resize", ()=>{
   if(!_lastChartPayload) return;
-const {labels, invested, interest, net, gross, basePV} = _lastChartPayload;
+
+const {labels, invested, interest, net, gross, taxCum, basePV} = _lastChartPayload;
 const canvas = document.getElementById("avgChart");
-renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross);
+
+renderStackedBarChart(canvas, labels, invested, interest, net, basePV, gross, taxCum);
 });
 
 // ===== ENTER = immer "Weiter" =====
