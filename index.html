@@ -317,7 +317,7 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 
   <span style="display:inline-flex; align-items:center; gap:6px;">
     <span style="width:10px; height:10px; border-radius:50%; background:#2196F3; display:inline-block;"></span>
-    Zinszuwachs
+    Kursgewinn
   </span>
 </p>
       </div>
@@ -338,6 +338,131 @@ th, td { padding:10px; border-bottom:1px solid #ddd; text-align:center; }
 <script>
 let mode = null;
 let _lastChartPayload = null;
+
+
+// ===== UI-STATE speichern (ETF Auswahl / Custom) =====
+let _uiState = {
+  mode: null,
+  strategy: null,
+  // normale Strategien: radio Auswahl je Tabellenname
+  radios: {}, // { etf1: "0", etf2w:"2", ... }
+  // customize
+  custom: {
+    customCount: 0,
+    checkedEids: [],
+    customWeights: {},  // {eid: weight}
+    customFinished: false,
+    step: 1             // 1/2/3
+  }
+};
+
+function saveUIState(){
+  _uiState.mode = mode;
+  _uiState.strategy = strategy;
+
+  // Radios speichern
+  const names = ["etf1","etf2w","etf2em","etf3w","etf3em","etf3s"];
+  names.forEach(n=>{
+    const v = document.querySelector(`input[name="${n}"]:checked`)?.value;
+    if(v !== undefined) _uiState.radios[n] = String(v);
+  });
+
+  // Customize speichern
+  _uiState.custom.customCount = customCount;
+  _uiState.custom.customFinished = !!customFinished;
+
+  const checked = Array.from(document.querySelectorAll(`#custom-box input[name="custom-select"]:checked`))
+    .map(x => String(x.value || "").trim())
+    .filter(Boolean);
+
+  _uiState.custom.checkedEids = checked;
+  _uiState.custom.customWeights = { ...customWeights };
+
+  // welcher Custom Step ist sichtbar?
+  const s1 = document.getElementById("custom-step1");
+  const s2 = document.getElementById("custom-step2");
+  const s3 = document.getElementById("custom-step3");
+  _uiState.custom.step =
+    (s3 && s3.style.display !== "none") ? 3 :
+    (s2 && s2.style.display !== "none") ? 2 : 1;
+}
+
+function restoreUIState(){
+  // nur restore wenn Mode/Strategy gleich ist
+  if(_uiState.mode !== mode) return;
+  if(_uiState.strategy !== strategy) return;
+
+  // Radios restore
+  Object.entries(_uiState.radios).forEach(([name, val])=>{
+    const r = document.querySelector(`input[name="${name}"][value="${val}"]`);
+    if(r){
+      r.checked = true;
+      r.closest("tr")?.classList.add("selected");
+    }
+  });
+
+  // Customize restore
+  if(strategy === 4){
+    customCount = _uiState.custom.customCount || customCount;
+    customWeights = { ...(_uiState.custom.customWeights || {}) };
+    customFinished = !!_uiState.custom.customFinished;
+
+    // Step UI passend setzen
+    document.getElementById("custom-step1").style.display = (_uiState.custom.step === 1) ? "block" : "none";
+    document.getElementById("custom-step2").style.display = (_uiState.custom.step === 2) ? "block" : "none";
+    document.getElementById("custom-step3").style.display = (_uiState.custom.step === 3) ? "block" : "none";
+
+    // Falls Step2 Tabelle existiert: Checks setzen
+    const setChecks = () => {
+      _uiState.custom.checkedEids.forEach(eid=>{
+        const c = document.querySelector(`#custom-box input[name="custom-select"][value="${eid}"]`);
+        if(c){
+          c.checked = true;
+          c.closest("tr")?.classList.add("selected");
+        }
+      });
+    };
+
+    // Wenn Step2 sichtbar ist, Tabelle ist schon da:
+    setTimeout(setChecks, 0);
+
+    // Wenn Step3 sichtbar ist: Inputs ggf. neu bauen und Werte wieder einsetzen
+    if(_uiState.custom.step === 3){
+      // Step3 basiert auf selected -> also erst die Inputs neu erzeugen
+      // wir rufen customStep2-Logik nicht, sondern bauen minimal:
+
+      const selected = Array.from(document.querySelectorAll(`#custom-box input[name="custom-select"]:checked`)
+    );
+
+      const container = document.getElementById("weight-inputs");
+      if(container){
+
+        container.innerHTML = "";
+        selected.forEach(c=>{
+          const row = c.closest("tr");
+          const tds = row?.querySelectorAll("td");
+          const name = (tds?.[2]?.innerText || "").trim();
+          const key = String(c.value || "").trim();
+          container.innerHTML += `
+            <label>${name} Gewicht (%)</label>
+            <input type="text" inputmode="decimal" placeholder="z.B. 50" data-key="${key}">
+          `;
+        });
+
+        // Werte rein
+        container.querySelectorAll("input").forEach(inp=>{
+          const k = inp.dataset.key;
+          const w = customWeights?.[k];
+          if(Number.isFinite(w)) inp.value = (w*100).toFixed(2).replace(".", ",");
+        });
+      }
+    }
+  }
+
+  updateETFInfos();
+  updateRebalancingPanel();
+}
+
 
 
 // ===== STEP NAVIGATION (Back ohne Reload) =====
@@ -382,6 +507,9 @@ function gotoStep(step){
 
 // Back (per Button)
 function goBack(){
+
+    saveUIState();
+
   // Wenn wir in Customize Sub-Steps sind, zuerst intern zurückgehen:
   if(currentStep === STEP.ETF && strategy == 4){
     // Custom Step 3 -> Step 2
@@ -459,10 +587,15 @@ function getSelectedETFsFromUI(){
     if(r.name === "etf3em") etf = etfData.em3[idx];
     if(r.name === "etf3s")  etf = etfData.variable4[idx];
 
-    const eid = etf?.eid ? String(etf.eid) : "";
+    const eid = etf?.eid ? String(etf.eid) : "";  
 
     // fallback, falls irgendwas nicht passt
-    picked.push({ eid: eid || (wkn ? ("WKN_"+wkn) : ("IDX_"+idx)), wkn, name });
+    if(!eid){
+  // harte Sicherheitsbremse: ohne eid darf Rebalancing keine Inputs bauen
+  console.warn("ETF ohne eid gefunden:", { wkn, name, idx, rname: r.name });
+  return;
+  }
+   picked.push({ eid, wkn, name });
   });
 
   // Customize (Checkboxes) -> value ist eid
@@ -536,8 +669,12 @@ function updateRebalancingPanel(){
   `;
 
 picked.forEach((e, idx)=>{
-  const key = e.eid ? String(e.eid) : String(idx);   // <-- stabil
-  const id  = `cur_${key}`;
+ const key = String(e.eid || "").trim();
+ if(!key){
+  console.warn("Rebalancing: missing eid for", e);
+  return;
+ }
+ const id = `cur_${key}`;
 
 
   html += `
@@ -979,13 +1116,13 @@ function getZinsen(jahre){
 // --- Berechnungsfunktionen ---
 function berechneFV(pv, pmt, zins, jahre){
     if(zins === 0) return pv + pmt * 12 * jahre;
-    let monatszins = zins / 12;
+    let monatszins = monthlyRateFromAnnual(zins);
     let monate = jahre * 12;
     return pv * Math.pow(1 + monatszins, monate) + pmt * (Math.pow(1 + monatszins, monate) - 1) / monatszins;
 }
 function berechneJahre(pv, pmt, ziel, zins){
     if(zins === 0) return (ziel - pv) / (pmt * 12);
-    let monatszins = zins / 12;
+    let monatszins = monthlyRateFromAnnual(zins);
     return Math.log((ziel * monatszins + pmt) / (pv * monatszins + pmt)) / (12 * Math.log(1 + monatszins));
 }
 
@@ -996,8 +1133,8 @@ function realRateFromNominal(nominal, inflation){
 }
 
 function monthlyRateFromAnnual(annual){
-  // sauberer als annual/12
-  return Math.pow(1 + annual, 1/12) - 1;
+  const a = Math.max(-0.999999, annual);   // Schutz: 1+annual > 0
+  return Math.pow(1 + a, 1/12) - 1;
 }
 
 // FIFO-Lots in "Wert"-Einheiten (ohne Stücke/Kurse)
@@ -1062,9 +1199,15 @@ function simulateEntnahmeNominalFIFO({
 
   let k = base + g0;
 
-  let lots = [];
-  if(base > 0) lots.push({ cost: base, value: base });
-  if(g0   > 0) lots.push({ cost: 0,    value: g0   });
+let lots = [];
+const startValue = base + g0;
+
+if(startValue > 0){
+  lots.push({
+    cost: Math.min(base, startValue),   // Einstand
+    value: startValue                   // aktueller Wert (inkl. Gewinn)
+  });
+}
 
   const monthsMax = Math.round(yearsMax * 12);
   let monthsToZero = null;
@@ -1199,7 +1342,9 @@ function simulateEntnahmeNominalFIFO({
 
   const k30 = snapshots.get(30) ?? 0;
   const k60 = snapshots.get(60) ?? 0;
-  const k0 = startKapitalReal;
+
+  // Referenz = Start-Depotwert (Kapital + Start-Gewinne)
+  const k0 = (Math.max(0, startKapitalReal || 0) + Math.max(0, startGewinneReal || 0));
 
   const nachhaltig = (k60 >= k0 * 0.999);
 
@@ -1319,7 +1464,7 @@ if(mode=="entnahme"){
   document.getElementById("input-title").innerText="Entnahmephase berechnen";
 
   container.innerHTML = `
-    <input id="pv" type="text" class="euro-input" inputmode="decimal" placeholder="Kapital (€)">
+    <input id="pv" type="text" class="euro-input" inputmode="decimal" placeholder="netto Kapital (€)">
     <input id="start_gewinne" type="text" class="euro-input" inputmode="decimal" placeholder="Gewinne im Kapital (€) optional">
 
     <label>Art des Verzehrs</label>
@@ -1486,7 +1631,64 @@ function selectStrategy(n, el){
 }
 
 
+
+
+
 function goToStrategy(){
+
+    // ✅ Entnahme & Entnahme_Kapital: Netto-Auszahlung MUSS gesetzt sein
+  if(mode === "entnahme" || mode === "entnahme_kapital"){
+    const eEl = document.getElementById("entnahme");
+    if(!eEl){
+      alert("Auszahlung fehlt");
+      return;
+    }
+
+    const raw = String(eEl.value || "").trim();
+    if(raw === ""){
+      alert("Bitte gewünschte Netto-Auszahlung eintragen.");
+      eEl.focus();
+      return;
+    }
+
+    const v = parseEuro(raw);
+    if(!isFinite(v) || v <= 0){
+      alert("Bitte eine gültige Netto-Auszahlung (> 0) eingeben.");
+      eEl.focus();
+      return;
+    }
+
+    // zusätzlich: im Modus entnahme muss auch Startkapital vorhanden sein
+    if(mode === "entnahme"){
+      const pvEl = document.getElementById("pv");
+      const pvRaw = String(pvEl?.value || "").trim();
+      const pv = parseEuro(pvRaw);
+      if(pvRaw === "" || !isFinite(pv) || pv <= 0){
+        alert("Bitte gültiges Startkapital für die Entnahmephase eingeben.");
+        pvEl?.focus();
+        return;
+      }
+    }
+
+    // Zeitraum bei "mit Verzehr" erzwingen, wenn Feld sichtbar ist
+    const vz = document.getElementById("verzehr")?.value || "mit";
+    if(vz === "mit"){
+      const yEl = document.getElementById("verzehr_jahre");
+      const yRaw = String(yEl?.value || "").trim();
+      if(yRaw === ""){
+        alert("Bitte gewünschten Zeitraum (Jahre) eintragen.");
+        yEl?.focus();
+        return;
+      }
+      const y = parseNumberDE(yRaw);
+      if(!isFinite(y) || y <= 0){
+        alert("Bitte gültigen Zeitraum (Jahre) eingeben.");
+        yEl?.focus();
+        return;
+      }
+    }
+  }
+
   if(!mode){
     alert("Bitte zuerst einen Modus auswählen");
     return;
@@ -1511,7 +1713,7 @@ function goToStrategy(){
 
     // ungültig -> stoppen
     let y = parseNumberDE(yEl.value);
-    if(!y || y < 1 || y > 100){
+    if(!Number.isFinite(y) || y < 1 || y > 100){
       alert("Bitte gültige Anlagedauer (1–100 Jahre) eingeben.");
       yEl.focus();
       return;
@@ -1554,75 +1756,70 @@ function addCustomETF(){
 // --- ETF Auswahl ---
 
 function goToEtfs(){
-
-    if(!strategy){
-        alert("Bitte Strategie auswählen");
-        return;
-    }
-
-    const container = document.getElementById("etf-tables");
-    container.innerHTML="";
-
-    // ===== CUSTOM =====
-  if(strategy == 4){
-  gotoStep(STEP.ETF);
-    updateRebalancingPanel();
-
-
-  //  Customize-Box sichtbar machen
-  document.getElementById("custom-box").style.display = "block";
-
-  // Optional: normale ETF-Tabellen oben leer lassen
-  document.getElementById("etf-tables").innerHTML = "";
-
-  // Reset Customize-UI sauber
-  document.getElementById("custom-step1").style.display = "block";
-  document.getElementById("custom-step2").style.display = "none";
-  document.getElementById("custom-step3").style.display = "none";
-  document.getElementById("calc-btn").style.display = "none";
-
-  customWeights = {};
-  customCount = 0;
-  customFinished = false; // 
-  document.getElementById("calc-btn").style.display = "none"; // bleibt fürs Nicht-Rebalancing egal
-  updateRebalancingPanel(); //  Rebalancing-Panel sauber ausblenden
-
-  return;
-}
-
-
-
-    // ===== NORMALE STRATEGIEN =====
-
-    if(strategy==1)
-        container.innerHTML+=createTable("World ETF 100%", etfData.world3,"etf1");
-
-    if(strategy==2){
-        container.innerHTML+=createTable("World ETF 70%", etfData.world5,"etf2w");
-        container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf2em");
-    }
-
-    if(strategy==3){
-        container.innerHTML+=createTable("World ETF 50%", etfData.world5,"etf3w");
-        container.innerHTML+=createTable("EM ETF 30%", etfData.em3,"etf3em");
-        container.innerHTML+=createTable("Beliebiger ETF 20%", etfData.variable4,"etf3s");
-    }
-
-
- gotoStep(STEP.ETF);
-document.getElementById("custom-box").style.display = "none";
-
-// Rebalancing Panel immer passend ein-/ausblenden + Tabelle bauen
-updateRebalancingPanel();
-
-const btn = document.getElementById("calc-btn");
-if(mode === "rebalancing"){
-  btn.style.display = "block";
-  btn.innerText = "Rebalancing berechnen";
-} else {
-  btn.style.display = "block";
-  btn.innerText = "Berechnen";
+  if(!strategy){
+    alert("Bitte Strategie auswählen");
+    return;
   }
+
+  const container = document.getElementById("etf-tables");
+  container.innerHTML = "";
+
+  // ===== CUSTOM =====
+  if(strategy == 4){
+    gotoStep(STEP.ETF);
+
+    // Customize-Box sichtbar machen
+    document.getElementById("custom-box").style.display = "block";
+    document.getElementById("etf-tables").innerHTML = "";
+
+    const hasSavedCustom =
+      (_uiState.mode === mode && _uiState.strategy === 4 && (_uiState.custom.customCount || 0) > 0);
+
+    if(!hasSavedCustom){
+      // Reset Customize-UI sauber
+      document.getElementById("custom-step1").style.display = "block";
+      document.getElementById("custom-step2").style.display = "none";
+      document.getElementById("custom-step3").style.display = "none";
+      document.getElementById("calc-btn").style.display = "none";
+
+      customWeights = {};
+      customCount = 0;
+      customFinished = false;
+    } else {
+      document.getElementById("custom-step1").style.display = "none";
+      document.getElementById("custom-step2").style.display = "block";
+      buildCustomTable();
+      restoreUIState();
+    }
+
+    updateRebalancingPanel();
+    return; // ✅ nur bei Custom zurück
+  }
+
+  // ===== NORMALE STRATEGIEN =====
+  if(strategy == 1)
+    container.innerHTML += createTable("World ETF 100%", etfData.world3, "etf1");
+
+  if(strategy == 2){
+    container.innerHTML += createTable("World ETF 70%", etfData.world5, "etf2w");
+    container.innerHTML += createTable("EM ETF 30%", etfData.em3, "etf2em");
+  }
+
+  if(strategy == 3){
+    container.innerHTML += createTable("World ETF 50%", etfData.world5, "etf3w");
+    container.innerHTML += createTable("EM ETF 30%", etfData.em3, "etf3em");
+    container.innerHTML += createTable("Beliebiger ETF 20%", etfData.variable4, "etf3s");
+  }
+
+  gotoStep(STEP.ETF);
+  document.getElementById("custom-box").style.display = "none";
+
+  updateRebalancingPanel();
+  restoreUIState();
+
+  const btn = document.getElementById("calc-btn");
+  btn.style.display = "block";
+  btn.innerText = (mode === "rebalancing") ? "Rebalancing berechnen" : "Berechnen";
 }
 
 
@@ -1666,6 +1863,94 @@ document.addEventListener("click", (e) => {
 });
 
    
+
+// Rebalancing ohne Verkäufe (Waterfilling):
+// - nutzt current Werte + Zielgewichte
+// - investiert zuerst in die relativ untergewichteten Positionen (current/weight)
+// - wenn alles "gleich gut" ist, Rest proportional zu weights
+function allocateRebalanceNoSells(selectedETFs, currentByKey, pmt){
+  const items = selectedETFs
+    .map(e => {
+      const k = e._rbKey;
+      const w = Number(e.weight) || 0;
+      const cur = Number(currentByKey[k]) || 0;
+      return { k, w, cur };
+    })
+    .filter(x => x.w > 0);
+
+  const buy = Object.create(null);
+  items.forEach(x => buy[x.k] = 0);
+
+  if(items.length === 0 || !isFinite(pmt) || pmt <= 0) return buy;
+
+  // Normwert: wie "voll" ist eine Position relativ zu ihrem Zielgewicht?
+  // niedrig = untergewichtet
+  items.forEach(x => x.norm = x.cur / x.w);
+
+  // Sortiere aufsteigend nach norm
+  items.sort((a,b) => a.norm - b.norm);
+
+  let remaining = pmt;
+
+  // Waterfilling: erhöhe die niedrigsten Normwerte bis zum nächsten Level
+  let i = 0;
+  while(i < items.length && remaining > 1e-9){
+    // Gruppe: alle mit gleichem norm-Level (numerisch tolerant)
+    let j = i;
+    const level = items[i].norm;
+    while(j < items.length && Math.abs(items[j].norm - level) < 1e-12) j++;
+
+    // nächstes Ziel-Level (oder Infinity wenn keine nächste Stufe)
+    const nextLevel = (j < items.length) ? items[j].norm : Infinity;
+
+    // Summe der Gewichte in der Gruppe
+    let sumW = 0;
+    for(let t=i; t<j; t++) sumW += items[t].w;
+
+    // Wie viel Geld braucht man, um die Gruppe bis nextLevel anzuheben?
+    // deltaNorm * sumW
+    const deltaNorm = nextLevel - level;
+
+    if(!isFinite(deltaNorm) || deltaNorm <= 0){
+      // kann passieren durch Rundung -> skip
+      i = j;
+      continue;
+    }
+
+    const neededToNext = deltaNorm * sumW;
+
+    if(remaining >= neededToNext){
+      // wir können die ganze Gruppe bis zum nächsten Level heben
+      for(let t=i; t<j; t++){
+        const add = deltaNorm * items[t].w;
+        buy[items[t].k] += add;
+        items[t].cur += add;
+        items[t].norm = items[t].cur / items[t].w;
+      }
+      remaining -= neededToNext;
+      i = j; // Gruppe wächst (nächste Stufe)
+    } else {
+      // wir heben nur anteilig (remaining) proportional zu Gewichten der Gruppe
+      const delta = remaining / sumW;
+      for(let t=i; t<j; t++){
+        const add = delta * items[t].w;
+        buy[items[t].k] += add;
+        items[t].cur += add;
+        items[t].norm = items[t].cur / items[t].w;
+      }
+      remaining = 0;
+      break;
+    }
+  }
+
+  // Wenn noch Rest übrig ist (z.B. alles exakt gleich voll), verteile proportional zu weights
+  if(remaining > 1e-9){
+    const sumW = items.reduce((s,x)=>s+x.w,0) || 1;
+    items.forEach(x => buy[x.k] += remaining * (x.w / sumW));
+  }
+
+  return buy;
+}
 
  
 
@@ -1744,7 +2029,11 @@ function berechnen(){
   }
 
   // _rbKey IMMER setzen (für cur_ IDs)
-  selectedETFs = selectedETFs.map(e => ({ ...e, _rbKey: String(e.eid || e.wkn) }));
+  selectedETFs = selectedETFs.map(e => ({ ...e, _rbKey: String(e.eid || "").trim() }));
+  if(selectedETFs.some(e => !e._rbKey)){
+  alert("Interner Fehler: ETF-ID fehlt (eid). Bitte Seite neu laden oder ETFs neu wählen.");
+  return;
+}
 
 
 
@@ -1797,20 +2086,8 @@ function berechnen(){
 
  const sumNeed = needs.reduce((s,x)=> s + x.need, 0);
 
-  const buy = {};
-  selectedETFs.forEach(e=> buy[e._rbKey] = 0);
-
-  if(sumNeed <= 0){
-    selectedETFs.forEach(e => buy[e._rbKey] = pmt * e.weight);
-  } else if(sumNeed >= pmt){
-    needs.forEach(x => buy[x._rbKey] = pmt * (x.need / sumNeed));
-  } else {
-    needs.forEach(x => buy[x._rbKey] = x.need);
-    const rest = pmt - sumNeed;
-    selectedETFs.forEach(e => {
-      buy[e._rbKey] += rest * e.weight;
-    });
-  }
+  // Smarter Fallback: Waterfilling (ohne Verkäufe)
+  const buy = allocateRebalanceNoSells(selectedETFs, current, pmt);
 
   const newVal = {};
   const newW = {};
@@ -1912,10 +2189,12 @@ function berechnen(){
 
    const PV = parseEuro(document.getElementById("pv")?.value);
    const START_G = parseEuro(document.getElementById("start_gewinne")?.value);
-   const startGewinne = Math.max(0, START_G || 0);
-   const PMT_INPUT = parseEuro(document.getElementById("pmt")?.value);
+   const startGewinne = Math.max(0, Number.isFinite(START_G) ? START_G : 0);
+   const PMT_RAW = parseEuro(document.getElementById("pmt")?.value);
+   const PMT_INPUT = Number.isFinite(PMT_RAW) ? PMT_RAW : 0;
    const ziel = parseEuro(document.getElementById("ziel")?.value);
-   const sellFeeFixed = parseEuro(document.getElementById("sell_fee_fixed")?.value) || 0;
+   const feeFixedRaw = parseEuro(document.getElementById("sell_fee_fixed")?.value);
+   const sellFeeFixed = Number.isFinite(feeFixedRaw) ? feeFixedRaw : 0;
    const sellFeePct   = (parseNumberDE(document.getElementById("sell_fee_pct")?.value) || 0) / 100;
    const minEl = document.getElementById("sell_fee_min");
    const maxEl = document.getElementById("sell_fee_max");
@@ -1926,19 +2205,38 @@ function berechnen(){
    const uiMin = uiMinRaw === "" ? null : parseEuro(uiMinRaw);
    const uiMax = uiMaxRaw === "" ? null : parseEuro(uiMaxRaw);
 
-   const sellFeeMin = (uiMin != null && isFinite(uiMin)) ? Math.max(0, uiMin)
+   let sellFeeMin = (uiMin != null && isFinite(uiMin)) ? Math.max(0, uiMin)
                   : (_sellFeeMin != null ? _sellFeeMin : null);
 
-   const sellFeeMax = (uiMax != null && isFinite(uiMax)) ? Math.max(0, uiMax)
+   let sellFeeMax = (uiMax != null && isFinite(uiMax)) ? Math.max(0, uiMax)
                   : (_sellFeeMax != null ? _sellFeeMax : null);
+
+                  // ✅ Fee-Min/Max normalisieren
+if(sellFeeMin != null && sellFeeMax != null){
+  if(!isFinite(sellFeeMin) || !isFinite(sellFeeMax)){
+    // wenn irgendwas kaputt ist -> ignoriere
+  } else if(sellFeeMin > sellFeeMax){
+    // sinnvollster Fix: tauschen
+    const tmp = sellFeeMin;
+    sellFeeMin = sellFeeMax;
+    sellFeeMax = tmp;
+  }
+}
 
    const feeFixed = Math.max(0, sellFeeFixed);
    const feePct   = Math.min(1, Math.max(0, sellFeePct));       
 
- if((mode === "sparrate" || mode === "ansparzeit") && (!ziel || ziel <= 0)){
-  alert("Bitte gültiges Zielkapital eingeben");
-  return;
- }
+// ✅ ansparzeit braucht zwingend eine positive Sparrate
+if(mode === "ansparzeit"){
+  if(!Number.isFinite(PV) || PV < 0){
+    alert("Bitte gültiges Startkapital eingeben (>= 0).");
+    return;
+  }
+  if(!Number.isFinite(PMT_INPUT) || PMT_INPUT <= 0){
+    alert("Bitte gültige monatliche Sparrate (> 0) eingeben.");
+    return;
+  }
+}
 
     let jahre = null;
 
@@ -1958,8 +2256,13 @@ function berechnen(){
 
     jahre = Math.round(jahre);
 }
-    const zins  = parseNumberDE(document.getElementById("zins")?.value) / 100;
+    const zinsRaw = parseNumberDE(document.getElementById("zins")?.value);
+    const zins = Number.isFinite(zinsRaw) ? (zinsRaw / 100) : 0;
     const entnahme = parseEuro(document.getElementById("entnahme")?.value);
+    if((mode === "entnahme" || mode === "entnahme_kapital") && (!entnahme || entnahme <= 0)){
+     alert("Bitte gewünschte Netto-Auszahlung eingeben.");
+      return;
+}
     function withdrawalNetFactor(kirchensteuer, steuerFaktor){
      // Steuer nur auf steuerpflichtigen Anteil (nach Teilfreistellung)
     const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0)); // Abgeltung+Soli+Kirche
@@ -1968,7 +2271,8 @@ function berechnen(){
 }
     const entnahmeFreq = document.getElementById("entnahme_freq")?.value || "monatlich";
     const verzehr = document.getElementById("verzehr")?.value || "mit";
-    const inflation = (parseNumberDE(document.getElementById("inflation")?.value) || 2) / 100; // default 2% 
+    const inflRaw = parseNumberDE(document.getElementById("inflation")?.value);
+    const inflation = (Number.isFinite(inflRaw) ? inflRaw : 2) / 100; // default 2% 
     const verzehrJahreInput = parseNumberDE(document.getElementById("verzehr_jahre")?.value);
     const verzehrJahre = (verzehr === "mit" && verzehrJahreInput > 0) ? verzehrJahreInput : null;   
     let kirchensteuer =
@@ -2061,15 +2365,73 @@ if(strategy == 4){
     let rw, ra, rb;
 
  //  Ansparzeit: immer feste Zinssätze 5% / 6% / 8%
- if (mode === "ansparzeit") {
-  rw = 0.05;
-  ra = 0.06;
-  rb = 0.08;
+   if(mode === "entnahme" || mode === "entnahme_kapital"){
+    if(zins > 0){
+      rw = ra = rb = zins;
+    } else {
+      rw = 0.04;
+      ra = 0.06;
+      rb = 0.08;
+    }
+} else {
+
+  // ✅ ansparzeit: Laufzeit ist Output -> Szenario iterativ finden (konvergiert schnell)
+  if(mode === "ansparzeit" && !(zins > 0)){
+
+    // Start-Guess: 15 Jahre
+    let guessYears = 15;
+
+    for(let iter=0; iter<6; iter++){
+      const [rw0, ra0, rb0] = getZinsen(guessYears);
+
+      // wir schätzen die Dauer mit dem Durchschnittsszenario (ra0)
+      const eff = Math.max(ra0 - portfolioTER, -0.99);
+
+      // berechne Dauer (wie in deinem ansparzeit-Teil), aber nur grob:
+      // gleiche Logik wie in calc(), nur hier als "estimate"
+      let low = 0, high = 1;
+
+      for(let guard=0; guard<60; guard++){
+        const fv = berechneFV(PV, PMT_INPUT, eff, high);
+        const ein = PV + PMT_INPUT * 12 * high;
+        const gewinn = Math.max(0, fv - ein);
+        const steuer = gewinn * steuerFaktor * 0.25 * (1 + 0.055 + kirchensteuer);
+        const net = fv - steuer;
+        if(net >= ziel) break;
+        high *= 2;
+      }
+
+      for(let i=0; i<40; i++){
+        const mid = (low + high) / 2;
+        const fv = berechneFV(PV, PMT_INPUT, eff, mid);
+        const ein = PV + PMT_INPUT * 12 * mid;
+        const gewinn = Math.max(0, fv - ein);
+        const steuer = gewinn * steuerFaktor * 0.25 * (1 + 0.055 + kirchensteuer);
+        const net = fv - steuer;
+        if(net < ziel) low = mid;
+        else high = mid;
+      }
+
+      const newGuess = (low + high) / 2;
+
+      // Konvergenz
+      if(Math.abs(newGuess - guessYears) < 0.25){
+        guessYears = newGuess;
+        break;
+      }
+      guessYears = newGuess;
+    }
+
+    // finale Szenarien nach konvergierter Laufzeit
+    [rw, ra, rb] = getZinsen(guessYears);
+
   } else {
-  // für alle anderen Modi wie bisher
-  const yearsForScenario = (mode === "entnahme" || mode === "entnahme_kapital") ? 30 : jahre;
-  [rw, ra, rb] = (zins > 0) ? [zins, zins, zins] : getZinsen(yearsForScenario);
- }
+    // ✅ endkapital/sparrate: jahre ist vorhanden -> wie gehabt
+    const yearsForScenario = jahre;
+    [rw, ra, rb] = (zins > 0) ? [zins, zins, zins] : getZinsen(yearsForScenario);
+  }
+}
+
 
     function calc(r){
         const effektiverZins = Math.max(r - portfolioTER, -0.99);
@@ -2474,7 +2836,7 @@ const grossSeries = buildYearSeriesEndkapital(PV, PMT_INPUT, effektivZinsAvg, ye
 
 const investedSeries = buildYearSeriesInvested(PV, PMT_INPUT, yearsInt);
 
-// Zinszuwachs (netto gesamt) = Netto - Investiert
+// Kursgewinn (netto gesamt) = Netto - Investiert
 const interestSeries = netSeries.map((v,i)=> v - investedSeries[i]);
 
 const labels = Array.from({length: yearsInt}, (_,i)=> String(i+1));
@@ -2523,7 +2885,7 @@ vergleichHTML = `
     <td>${euro(entnahmeFreq === "monatlich" ? (b.grossMonthlyReal ?? 0) : (b.grossYearlyReal ?? 0))}</td>
   </tr>
 
-  <tr><td>Realzins (nach TER)</td>
+  <tr><td>Realzins (nach TER+ Inflation)</td>
     <td>${(w.rReal*100).toFixed(2)}%</td>
     <td>${(a.rReal*100).toFixed(2)}%</td>
     <td>${(b.rReal*100).toFixed(2)}%</td>
@@ -2596,19 +2958,13 @@ vergleichHTML = `
     <td>${euro(entnahme)}</td>
   </tr>
 
-  <tr><td>Benötigte Auszahlung (brutto, ${freqTxt}, </td>
-    <td>${euro(w.grossFirstReal ?? 0)}</td>
-    <td>${euro(a.grossFirstReal ?? 0)}</td>
-    <td>${euro(b.grossFirstReal ?? 0)}</td>
-  </tr>
-
-  <tr><td>Realzins (nach TER)</td>
+  <tr><td>Realzins (nach TER+ Inflation)</td>
     <td>${(w.rReal*100).toFixed(2)}%</td>
     <td>${(a.rReal*100).toFixed(2)}%</td>
     <td>${(b.rReal*100).toFixed(2)}%</td>
   </tr>
 
-  <tr><th>Benötigtes Kapital (${artTxt})</th>
+  <tr><th>Benötigtes netto Kapital (${artTxt})</th>
     <th>${euroOrInf(w.requiredKapital)}</th>
     <th>${euroOrInf(a.requiredKapital)}</th>
     <th>${euroOrInf(b.requiredKapital)}</th>
@@ -2689,7 +3045,7 @@ if(mode === "entnahme"){
   const grossAvg = (entnahmeFreq === "monatlich") ? (a.grossMonthlyReal ?? 0) : (a.grossYearlyReal ?? 0);
 
    infoHTML += `
-    <p><strong>Eingezahlt (Kapital):</strong> ${euro(PV)}</p>
+    <p><strong>Eingezahlt netto Kapital:</strong> ${euro(PV)}</p>
     ${startGewinne > 0 ? `<p><strong>Start-Gewinne:</strong> ${euro(startGewinne)}</p>
     <p><strong>Depotwert Start (gesamt):</strong> ${euro(PV + startGewinne)}</p>` : `<p><strong>Depotwert Start (gesamt):</strong> ${euro(PV)}</p>`}
     <p><strong>Art:</strong> ${verzehrTxt}</p>
@@ -2791,11 +3147,11 @@ let totalStocks = selectedETFs.reduce((sum, e)=>{
 etfBox.innerHTML += `
     <hr style="margin:15px 0;">
     <p style="font-size:12px; color:#666; margin-top:6px;">
-  TER wirkt als laufender Renditeabzug im Fonds (Performance), nicht als separate Rechnung.
+  TER wirkt als laufender Renditeabzug
 </p>
     <p><strong>Summe Einzel-TER:</strong> ${sumTERPercent}%</p>
     <p><strong>Portfolio-TER (gewichtet):</strong> ${portfolioTERPercent}%</p>
-    <p><strong>Zinssätze (angenommen):</strong><br>
+    <p><strong>angenommene Kursgewinne p.a. (Szenarien, vor Inflation):</strong><br>
     Schlecht: ${ (rw*100).toFixed(2) }%<br>
     Durchschnitt: ${ (ra*100).toFixed(2) }%<br>
     Bester: ${ (rb*100).toFixed(2) }%
@@ -2970,16 +3326,33 @@ function customStep1(){
 const tds = row.querySelectorAll("td");
 const wkn = (tds[1]?.innerText || "").trim();
 const name = (tds[2]?.innerText || "").trim();
-const key = String(c.value || "").trim(); // WKN als stabiler Key
+const key = String(c.value || "").trim(); // eid als stabiler Key
 
-container.innerHTML += `
-  <label>${name} Gewicht (%)</label>
-  <input type="text"
-         inputmode="decimal"
-         placeholder="z.B. 50"
-         data-key="${key}">
-`;
+// ... innerhalb customStep2()
+
+container.innerHTML = "";
+
+selected.forEach((c)=>{
+  const row = c.closest("tr");
+  const tds = row.querySelectorAll("td");
+  const name = (tds[2]?.innerText || "").trim();
+  const key  = String(c.value || "").trim();
+
+  container.innerHTML += `
+    <label>${name} Gewicht (%)</label>
+    <input type="text" inputmode="decimal" placeholder="z.B. 50" data-key="${key}">
+  `;
 });
+
+// NACH dem Bauen einmal Werte rein
+container.querySelectorAll("input").forEach(inp=>{
+  const k = inp.dataset.key;
+  const w = customWeights?.[k];
+  if(Number.isFinite(w)) inp.value = (w*100).toFixed(2).replace(".", ",");
+});
+
+});
+
 }
 
 
@@ -3039,23 +3412,27 @@ function finishCustom(){
 // ===== EURO-EINGABE FORMATIERUNG =====
 
 function parseNumberDE(str){
-    if(str === undefined || str === null) return 0;
-    str = String(str).trim();
-    if(!str) return 0;
+  if(str === undefined || str === null) return NaN;
 
-    // Tausenderpunkte entfernen, Dezimalkomma -> Punkt
-    // erlaubt auch Eingaben wie "1.234,56" oder "7,5"
-    return parseFloat(
-        str.replace(/\./g, "").replace(",", ".")
-    ) || 0;
+  const s = String(str).trim();
+  if(s === "") return NaN;
+
+  const normalized = s.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(normalized);
+
+  return Number.isFinite(n) ? n : NaN;
 }
 
 function parseEuro(str){
-  if(str === undefined || str === null) return 0;
-  str = String(str).replace("€","").trim();
-  return parseFloat(
-    str.replace(/\./g, "").replace(",", ".")
-  ) || 0;
+  if(str === undefined || str === null) return NaN;
+
+  const s = String(str).replace("€","").trim();
+  if(s === "") return NaN;
+
+  const normalized = s.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(normalized);
+
+  return Number.isFinite(n) ? n : NaN;
 }
 
 // ===== BROKER FEE PRESETS (optional) =====
@@ -3293,7 +3670,7 @@ function formatEURShort(x){
 // Brutto-Reihe (falls du sie irgendwann wieder brauchst)
 function buildYearSeriesEndkapital(PV, PMT, effektivZins, jahre){
   const series = [];
-  const monatszins = effektivZins / 12;
+  const monatszins = monthlyRateFromAnnual(effektivZins);
   let value = PV;
 
   for(let y=1; y<=jahre; y++){
@@ -3309,7 +3686,7 @@ function buildYearSeriesEndkapital(PV, PMT, effektivZins, jahre){
 // Netto-Reihe (Buy&Hold): Steuer erst im LETZTEN Jahr (Endverkauf)
 function buildYearSeriesNetto(PV, PMT, effektivZins, jahre, steuerFaktor, kirchensteuer){
   const series = [];
-  const monatszins = effektivZins / 12;
+  const monatszins = monthlyRateFromAnnual(effektivZins);
   let value = PV;
 
   const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0));
@@ -3340,7 +3717,7 @@ function buildYearSeriesNetto(PV, PMT, effektivZins, jahre, steuerFaktor, kirche
 // Kumulierte Steuer (Buy&Hold): 0 bis zum letzten Jahr, dann gesamte Steuer
 function buildYearSeriesTaxCum(PV, PMT, effektivZins, jahre, steuerFaktor, kirchensteuer){
   const series = [];
-  const monatszins = effektivZins / 12;
+  const monatszins = monthlyRateFromAnnual(effektivZins);
   let value = PV;
 
   const taxRate = 0.25 * (1 + 0.055 + (kirchensteuer || 0));
@@ -3593,12 +3970,12 @@ const intYearNet = intYearGross - taxYear;
     </div>
 
     <div class="row">
-      <span><span class="dot" style="background:#2196F3;"></span>Zinszuwachs (gesamt, netto)</span>
+      <span><span class="dot" style="background:#2196F3;"></span>Kursgewinn (gesamt, netto)</span>
       <span><b>${formatEUR(intCum)}</b></span>
     </div>
 
     <div class="row">
-      <span><span class="dot" style="background:#2196F3; opacity:.55;"></span>Zinszuwachs (im Jahr, brutto)</span>
+      <span><span class="dot" style="background:#2196F3; opacity:.55;"></span>Kursgewinn (im Jahr, brutto)</span>
       <span><b>${formatEUR(intYearGross)}</b></span>
     </div>
 
@@ -3608,7 +3985,7 @@ const intYearNet = intYearGross - taxYear;
      </div>
 
       <div class="row">
-        <span><span class="dot" style="background:#2196F3; opacity:.35;"></span>Zinszuwachs (im Jahr, netto)</span>
+        <span><span class="dot" style="background:#2196F3; opacity:.35;"></span>Kursgewinn (im Jahr, netto)</span>
         <span><b>${formatEUR(intYearNet)}</b></span>
       </div>
 
